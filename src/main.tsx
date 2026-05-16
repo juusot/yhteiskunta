@@ -41,9 +41,10 @@ precision highp float;
 in float v_type;
 out vec4 outColor;
 void main() {
-    if (v_type == 1.0) outColor = vec4(0.9, 0.9, 0.7, 1.0);
-    else if (v_type == 2.0) outColor = vec4(0.5, 0.5, 0.5, 1.0);
-    else outColor = vec4(1.0, 1.0, 0.9, 1.0);
+    if (v_type == 1.0) outColor = vec4(0.8, 0.9, 0.7, 1.0); // Forest (Light Greenish)
+    else if (v_type == 2.0) outColor = vec4(0.5, 0.7, 1.0, 1.0); // Water (Blue)
+    else if (v_type == 3.0) outColor = vec4(0.4, 0.4, 0.4, 1.0); // Mountain (Dark Grey)
+    else outColor = vec4(1.0, 1.0, 0.9, 1.0); // Grass (Pale Yellow)
 }`;
 
 const INF_VS = `#version 300 es
@@ -116,8 +117,16 @@ out vec4 outColor;
 void main() {
     if (v_health <= 0.0) discard;
     vec3 color = vec3(0.0, 0.0, 0.0);
-    if ((uint(v_type) & 1u) != 0u) color = vec3(0.2, 0.5, 0.2);
-    else {
+    uint traits = uint(v_type);
+    
+    if ((traits & 1u) != 0u) {
+        color = vec3(0.1, 0.5, 0.1); // Tree (Deep Green)
+    } else if ((traits & 2u) != 0u) {
+        color = vec3(1.0, 0.8, 0.0); // Gold (Metallic Yellow)
+    } else if ((traits & 4u) != 0u) {
+        color = vec3(0.2, 0.4, 0.2); // Bush (Sage Green)
+    } else {
+      // Characters
       if (v_group == 0.0) color = vec3(1.0, 1.0, 0.0);
       else if (v_group == 1.0) color = vec3(1.0, 0.0, 0.0);
       else if (v_group == 2.0) color = vec3(0.0, 0.0, 1.0);

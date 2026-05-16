@@ -3,27 +3,34 @@ import * as C from './constants';
 import * as S from './state';
 
 export function generateBiomes(): void {
-  S.worldMap.fill(0);
-  const centerX = C.WORLD_MAP_COLS / 2;
-  const centerY = C.WORLD_MAP_ROWS / 2;
-  const radius = 25;
-  for (let y = 0; y < C.WORLD_MAP_ROWS; y++) {
-    for (let x = 0; x < C.WORLD_MAP_COLS; x++) {
-      const dx = x - centerX;
-      const dy = y - centerY;
-      if (dx * dx + dy * dy < radius * radius) S.worldMap[y * C.WORLD_MAP_COLS + x] = 2;
+  S.worldMap.fill(C.TerrainType.Grass);
+  
+  // Winding River
+  for (let x = 0; x < C.WORLD_MAP_COLS; x++) {
+    const y = Math.floor(60 + Math.sin(x * 0.1) * 20);
+    for (let dy = -2; dy <= 2; dy++) {
+      const ty = Math.min(C.WORLD_MAP_ROWS - 1, Math.max(0, y + dy));
+      S.worldMap[ty * C.WORLD_MAP_COLS + x] = C.TerrainType.Water;
     }
   }
 
-  for (let i = 0; i < 30; i++) {
+  // Mountains (Top and Bottom edges)
+  for (let x = 0; x < C.WORLD_MAP_COLS; x++) {
+    for (let y = 0; y < 10; y++) S.worldMap[y * C.WORLD_MAP_COLS + x] = C.TerrainType.Mountain;
+    for (let y = C.WORLD_MAP_ROWS - 10; y < C.WORLD_MAP_ROWS; y++) S.worldMap[y * C.WORLD_MAP_COLS + x] = C.TerrainType.Mountain;
+  }
+
+  // Forest Patches
+  for (let i = 0; i < 40; i++) {
     const fx = Math.floor(Math.random() * C.WORLD_MAP_COLS);
     const fy = Math.floor(Math.random() * C.WORLD_MAP_ROWS);
-    const fr = Math.floor(Math.random() * 10) + 5;
+    const fr = Math.floor(Math.random() * 8) + 4;
     for (let y = Math.max(0, fy - fr); y < Math.min(C.WORLD_MAP_ROWS, fy + fr); y++) {
       for (let x = Math.max(0, fx - fr); x < Math.min(C.WORLD_MAP_COLS, fx + fr); x++) {
         const dx = x - fx; const dy = y - fy;
         if (dx * dx + dy * dy < fr * fr) {
-          if (S.worldMap[y * C.WORLD_MAP_COLS + x] === 0) S.worldMap[y * C.WORLD_MAP_COLS + x] = 1;
+          if (S.worldMap[y * C.WORLD_MAP_COLS + x] === C.TerrainType.Grass) 
+            S.worldMap[y * C.WORLD_MAP_COLS + x] = C.TerrainType.Forest;
         }
       }
     }
@@ -56,13 +63,13 @@ export function initializeWorld(): void {
 
   // Define 4 Primary Nations
   // 0: Yellow Star (Top-Left)
-  S.groupWarehouseX[0] = 100; S.groupWarehouseY[0] = 100; S.groupVisualArchetypes[0] = 3;
+  S.groupWarehouseX[0] = 150; S.groupWarehouseY[0] = 150; S.groupVisualArchetypes[0] = 3;
   // 1: Red Circle (Top-Right)
-  S.groupWarehouseX[1] = 1500; S.groupWarehouseY[1] = 100; S.groupVisualArchetypes[1] = 1;
+  S.groupWarehouseX[1] = 1450; S.groupWarehouseY[1] = 150; S.groupVisualArchetypes[1] = 1;
   // 2: Blue Triangle (Bottom-Left)
-  S.groupWarehouseX[2] = 100; S.groupWarehouseY[2] = 1100; S.groupVisualArchetypes[2] = 0;
+  S.groupWarehouseX[2] = 150; S.groupWarehouseY[2] = 1050; S.groupVisualArchetypes[2] = 0;
   // 3: Pink Square (Bottom-Right)
-  S.groupWarehouseX[3] = 1500; S.groupWarehouseY[3] = 1100; S.groupVisualArchetypes[3] = 2;
+  S.groupWarehouseX[3] = 1450; S.groupWarehouseY[3] = 1050; S.groupVisualArchetypes[3] = 2;
 
   generateBiomes();
 
@@ -98,14 +105,32 @@ export function initializeWorld(): void {
     }
   }
 
-  // Spawn 5000 trees
+  // Spawn Resources (Trees, Gold, Bushes)
   for (let i = 0; i < 5000; i++) {
     if (entityPtr >= C.MAX_ENTITIES) break;
     const id = entityPtr++;
+    
+    let x = Math.random() * C.WORLD_WIDTH;
+    let y = Math.random() * C.WORLD_HEIGHT;
+    const tx = Math.floor(x / C.TILE_SIZE);
+    const ty = Math.floor(y / C.TILE_SIZE);
+    const tileIdx = Math.min(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS - 1, Math.max(0, ty * C.WORLD_MAP_COLS + tx));
+    const terrain = S.worldMap[tileIdx];
+
+    if (terrain === C.TerrainType.Mountain) { entityPtr--; continue; } // Skip mountains
+
     S.state[id] = C.EntityState.Idle;
-    S.positionX[id] = Math.random() * C.WORLD_WIDTH;
-    S.positionY[id] = Math.random() * C.WORLD_HEIGHT;
+    S.positionX[id] = x;
+    S.positionY[id] = y;
     S.health[id] = 100;
-    S.traitBitmask[id] = C.TRAIT_TREE;
+
+    if (terrain === C.TerrainType.Water) {
+      S.traitBitmask[id] = C.TRAIT_GOLD;
+    } else if (terrain === C.TerrainType.Forest) {
+      S.traitBitmask[id] = C.TRAIT_TREE;
+    } else {
+      // Grass: either Tree or Bush
+      S.traitBitmask[id] = Math.random() > 0.4 ? C.TRAIT_TREE : C.TRAIT_BUSH;
+    }
   }
 }

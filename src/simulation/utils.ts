@@ -58,7 +58,8 @@ export function broadcastGroupCommand(groupId: number, commandState: number, tar
     if (S.state[i] === C.EntityState.Dead) continue;
     if (S.positionX[i] < S.minX || S.positionX[i] >= S.maxX || S.positionY[i] < S.minY || S.positionY[i] >= S.maxY) continue;
 
-    if ((S.traitBitmask[i] & C.TRAIT_TREE) !== 0) continue; 
+    const isResource = (S.traitBitmask[i] & (C.TRAIT_TREE | C.TRAIT_GOLD | C.TRAIT_BUSH)) !== 0;
+    if (isResource) continue; 
     let issuingPriority = 0; let slotIdx = -1; const baseIdx = i * 8;
     for (let s = 0; s < 8; s++) { if (S.groupAffiliations[baseIdx + s] === groupId) { slotIdx = s; issuingPriority = 8 - s; break; } }
     if (issuingPriority > 0) {

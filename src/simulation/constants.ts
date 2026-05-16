@@ -17,11 +17,20 @@ export const WORLD_MAP_ROWS = 120;
 
 export const TRAIT_NONE = 0;
 export const TRAIT_TREE = 1 << 0;
-export const TRAIT_AGGRESSIVE = 1 << 1;
-export const TRAIT_SCOUT = 1 << 2;
-export const TRAIT_FANATIC = 1 << 3;
-export const TRAIT_COURIER = 1 << 4;
-export const TRAIT_MAGIC = 1 << 5;
+export const TRAIT_GOLD = 1 << 1;
+export const TRAIT_BUSH = 1 << 2;
+export const TRAIT_AGGRESSIVE = 1 << 3;
+export const TRAIT_SCOUT = 1 << 4;
+export const TRAIT_FANATIC = 1 << 5;
+export const TRAIT_COURIER = 1 << 6;
+export const TRAIT_MAGIC = 1 << 7;
+
+export enum TerrainType {
+  Grass = 0,
+  Forest = 1,
+  Water = 2,
+  Mountain = 3,
+}
 
 export const EVENT_HOSTILE_ATTACK = 99;
 

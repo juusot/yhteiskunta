@@ -73,7 +73,10 @@ export function LifeSystem(): void {
       S.state[i] = C.EntityState.Dead;
       S.positionX[i] = -1000.0; S.positionY[i] = -1000.0;
       S.targetEntityId[i] = -1; S.velocityX[i] = 0; S.velocityY[i] = 0;
-      S.entityInventory[i] = 0; S.actionTimer[i] = 0; S.traitBitmask[i] = C.TRAIT_NONE;
+      S.entityInventory[i] = 0; S.actionTimer[i] = 0;
+      
+      const isResource = (S.traitBitmask[i] & (C.TRAIT_TREE | C.TRAIT_GOLD | C.TRAIT_BUSH)) !== 0;
+      if (!isResource) S.traitBitmask[i] = C.TRAIT_NONE;
     }
   }
 }
@@ -83,13 +86,26 @@ export function MovementSystem(): void {
     if (S.state[i] === C.EntityState.Dead) continue;
     if (S.positionX[i] < S.minX || S.positionX[i] >= S.maxX || S.positionY[i] < S.minY || S.positionY[i] >= S.maxY) continue;
 
-    const tileX = Math.floor(S.positionX[i] / C.TILE_SIZE); const tileY = Math.floor(S.positionY[i] / C.TILE_SIZE);
+    const nextX = S.positionX[i] + S.velocityX[i];
+    const nextY = S.positionY[i] + S.velocityY[i];
+
+    const tileX = Math.floor(nextX / C.TILE_SIZE); const tileY = Math.floor(nextY / C.TILE_SIZE);
     const tileIndex = Math.min(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS - 1, Math.max(0, tileY * C.WORLD_MAP_COLS + tileX));
     let speedModifier = 1.0;
     const terrainType = S.worldMap[tileIndex];
-    if (terrainType === 1) speedModifier = 0.6;
-    if (terrainType === 2) speedModifier = 0.2;
-    S.positionX[i] += S.velocityX[i] * speedModifier; S.positionY[i] += S.velocityY[i] * speedModifier;
+    
+    if (terrainType === C.TerrainType.Forest) speedModifier = 0.6;
+    if (terrainType === C.TerrainType.Water) speedModifier = 0.3;
+    if (terrainType === C.TerrainType.Mountain) {
+      // Impassable: stop and bounce
+      S.velocityX[i] *= -0.5;
+      S.velocityY[i] *= -0.5;
+      continue;
+    }
+
+    S.positionX[i] += S.velocityX[i] * speedModifier; 
+    S.positionY[i] += S.velocityY[i] * speedModifier;
+    
     if (S.positionX[i] < 0) { S.positionX[i] = 0; S.velocityX[i] *= -1; }
     else if (S.positionX[i] > 1600) { S.positionX[i] = 1600; S.velocityX[i] *= -1; }
     if (S.positionY[i] < 0) { S.positionY[i] = 0; S.velocityY[i] *= -1; }
@@ -160,13 +176,15 @@ export function AutonomySystem(): void {
         const canSearch = (S.tickCount + i) % 30 === 0;
         if (nextState === C.EntityState.Harvesting) {
           if (canSearch && S.targetEntityId[i] === -1) {
-            const treeId = U.findNearest(S.positionX[i], S.positionY[i], 300, C.TRAIT_TREE);
-            if (treeId !== -1) { S.targetEntityId[i] = treeId; S.actionTimer[i] = 200; }
+            const resourceMask = C.TRAIT_TREE | C.TRAIT_GOLD | C.TRAIT_BUSH;
+            const resId = U.findNearest(S.positionX[i], S.positionY[i], 300, resourceMask);
+            if (resId !== -1) { S.targetEntityId[i] = resId; S.actionTimer[i] = 200; }
             else { S.state[i] = C.EntityState.Idle; S.actionTimer[i] = 60; }
           } else if (S.targetEntityId[i] === -1) { S.state[i] = C.EntityState.Idle; S.actionTimer[i] = 1; }
         } else if (nextState === C.EntityState.Combat) {
           if (canSearch && S.targetEntityId[i] === -1) {
-            const targetId = U.findNearest(S.positionX[i], S.positionY[i], 250, ~C.TRAIT_TREE);
+            const charMask = ~(C.TRAIT_TREE | C.TRAIT_GOLD | C.TRAIT_BUSH);
+            const targetId = U.findNearest(S.positionX[i], S.positionY[i], 250, charMask);
             if (targetId !== -1 && targetId !== i) {
                // Friendly Fire Check
                const myGid = S.groupAffiliations[i * 8];
@@ -303,38 +321,42 @@ export function SteeringSystem(): void {
         else { S.targetEntityId[i] = -1; continue; }
       }
     } else { tx = S.positionX[targetId]; ty = S.positionY[targetId]; }
+
     const dx = tx - S.positionX[i]; const dy = ty - S.positionY[i]; const distSq = dx * dx + dy * dy;
-    
+
     if (S.state[i] === C.EntityState.Fleeing) {
       const dist = Math.sqrt(distSq); if (dist > 0.1) { S.velocityX[i] = -(dx / dist) * 2.0; S.velocityY[i] = -(dy / dist) * 2.0; }
       if (distSq > 160000) S.targetEntityId[i] = -1;
-    } else if (S.state[i] === C.EntityState.Combat) {
+    } else if (S.state[i] === C.EntityState.Combat || S.state[i] === C.EntityState.Harvesting) {
+      const speed = S.state[i] === C.EntityState.Combat ? 1.5 : 1.2;
       if (distSq > 400.0) { 
         const dist = Math.sqrt(distSq); 
-        S.velocityX[i] = (dx / dist) * 1.5; 
-        S.velocityY[i] = (dy / dist) * 1.5; 
+        S.velocityX[i] = (dx / dist) * speed; 
+        S.velocityY[i] = (dy / dist) * speed; 
       } else if (distSq > 4.0) {
         const dist = Math.sqrt(distSq);
         const damp = dist / 20.0;
-        S.velocityX[i] = (dx / dist) * 1.5 * damp;
-        S.velocityY[i] = (dy / dist) * 1.5 * damp;
+        S.velocityX[i] = (dx / dist) * speed * damp;
+        S.velocityY[i] = (dy / dist) * speed * damp;
       } else { 
-        S.velocityX[i] = 0; S.velocityY[i] = 0; 
-        if (Math.random() > 0.9) CombatDamageSystem(i, targetId, 10); 
+        S.velocityX[i] *= 0.5; S.velocityY[i] *= 0.5; 
+        if (Math.random() > 0.8) {
+          if (S.state[i] === C.EntityState.Combat) {
+            CombatDamageSystem(i, targetId, 10);
+          } else {
+            // Harvesting
+            S.health[targetId] -= 20;
+            S.entityInventory[i] += 10;
+            if (S.entityInventory[i] >= 100) {
+              S.state[i] = C.EntityState.ReturningToDepot;
+              S.targetEntityId[i] = -1;
+            }
+          }
+        }
       }
     } else {
-      if (distSq > 400.0) { 
-        const dist = Math.sqrt(distSq); 
-        S.velocityX[i] = (dx / dist) * 1.2; 
-        S.velocityY[i] = (dy / dist) * 1.2; 
-      } else if (distSq > 4.0) {
-        const dist = Math.sqrt(distSq);
-        const damp = dist / 20.0;
-        S.velocityX[i] = (dx / dist) * 1.2 * damp;
-        S.velocityY[i] = (dy / dist) * 1.2 * damp;
-      } else { 
-        S.velocityX[i] = 0; S.velocityY[i] = 0; 
-      }
+      const dist = Math.sqrt(distSq);
+      if (dist > 0.1) { S.velocityX[i] = (dx / dist) * 1.2; S.velocityY[i] = (dy / dist) * 1.2; }
     }
   }
 }

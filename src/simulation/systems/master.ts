@@ -86,6 +86,35 @@ export function SummarySystem(): void {
     }
   }
 
+  // Resource Regeneration
+  for (let i = 0; i < C.MAX_ENTITIES; i++) {
+    if (S.state[i] === C.EntityState.Dead) {
+      const traits = S.traitBitmask[i];
+      if ((traits & (C.TRAIT_TREE | C.TRAIT_GOLD | C.TRAIT_BUSH)) !== 0) {
+        // Regeneration chance
+        if (Math.random() > 0.95) {
+          let x = Math.random() * C.WORLD_WIDTH;
+          let y = Math.random() * C.WORLD_HEIGHT;
+          const tx = Math.floor(x / C.TILE_SIZE);
+          const ty = Math.floor(y / C.TILE_SIZE);
+          const tileIdx = Math.min(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS - 1, Math.max(0, ty * C.WORLD_MAP_COLS + tx));
+          const terrain = S.worldMap[tileIdx];
+
+          let valid = false;
+          if ((traits & C.TRAIT_GOLD) !== 0 && terrain === C.TerrainType.Water) valid = true;
+          else if ((traits & C.TRAIT_TREE) !== 0 && (terrain === C.TerrainType.Grass || terrain === C.TerrainType.Forest)) valid = true;
+          else if ((traits & C.TRAIT_BUSH) !== 0 && terrain === C.TerrainType.Grass) valid = true;
+
+          if (valid) {
+            S.positionX[i] = x; S.positionY[i] = y;
+            S.health[i] = 100;
+            S.state[i] = C.EntityState.Idle;
+          }
+        }
+      }
+    }
+  }
+
   self.postMessage({ type: "STATS_UPDATE", payload: { totalActive } });
 }
 
