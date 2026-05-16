@@ -62,7 +62,7 @@ export let mana: Int16Array;
 // Phase 12: Logistics
 export let entityInventory: Int16Array;
 
-// Spatial Partitioning Arrays
+// Spatial Partitioning Arrays (Local to each worker in Phase 20)
 export let spatialHead: Int32Array;
 export let spatialNext: Int32Array;
 
@@ -73,7 +73,7 @@ export let groupAffiliations: Int32Array;
 export let groupTargetEntityId: Int32Array;
 export let groupTargetX: Float32Array;
 export let groupTargetY: Float32Array;
-export let groupTargetAge: Int16Array;
+export let groupTargetAge: Int32Array;
 
 // Phase 12: Group Logistics
 export let groupWarehouseX: Float32Array;
@@ -92,8 +92,26 @@ export let groupMagicFrequency: Int8Array;
 export let activeCommandPriority: Uint8Array;
 export let activePrioritySlot: Int8Array;
 
+// Phase 20: Parallel Synchronization
+export let workerSync: Int32Array;
+let quadrantIndex = -1;
+let minX = 0, maxX = 1600, minY = 0, maxY = 1200;
+
 // Rule Engine Registry
 export let ruleRegistry: Int32Array;
+export let logicBytecode: Int32Array;
+
+// Phase 19: OpCodes & Gates
+const OP_POP_GT = 0;
+const OP_WEALTH_LT = 1;
+const OP_RELATION_LT = 2;
+const OP_DIST_GT = 3;
+const GATE_AND = 100;
+const GATE_OR = 101;
+const GATE_NOT = 102;
+const OP_END = 255;
+
+const MAX_BYTECODE_PER_RULE = 32;
 
 // Analytics Arrays (Summary System)
 export let groupPopulationCount: Int32Array;
@@ -103,6 +121,11 @@ export let groupTotalWealth: Int32Array;
 export let worldMap: Uint8Array;
 export let globalFlowField: Float32Array;
 let integrationField: Float32Array;
+
+// Phase 18: Influence & Territory
+export let influenceMap: Int16Array;
+export let territoryOwnerMap: Int32Array;
+let settlementTimerMap: Int16Array;
 
 /**
  * Initializes the global component arrays using SharedArrayBuffers.
@@ -127,8 +150,10 @@ export function initializeSimulation(): void {
 
   entityInventory = new Int16Array(new SharedArrayBuffer(MAX_ENTITIES * 2));
 
-  spatialHead = new Int32Array(new SharedArrayBuffer(NUM_CELLS * 4));
-  spatialNext = new Int32Array(new SharedArrayBuffer(MAX_ENTITIES * 4));
+  spatialHead = new Int32Array(NUM_CELLS);
+  spatialHead.fill(-1);
+  spatialNext = new Int32Array(MAX_ENTITIES);
+  spatialNext.fill(-1);
 
   groupAffiliations = new Int32Array(new SharedArrayBuffer(MAX_ENTITIES * 8 * 4));
 
@@ -136,10 +161,10 @@ export function initializeSimulation(): void {
   activePrioritySlot = new Int8Array(new SharedArrayBuffer(MAX_ENTITIES * 1));
 
   groupTargetEntityId = new Int32Array(new SharedArrayBuffer(MAX_GROUPS * 4));
+  groupTargetEntityId.fill(-1);
   groupTargetX = new Float32Array(new SharedArrayBuffer(MAX_GROUPS * 4));
   groupTargetY = new Float32Array(new SharedArrayBuffer(MAX_GROUPS * 4));
-  groupTargetAge = new Int16Array(new SharedArrayBuffer(MAX_GROUPS * 2));
-
+  groupTargetAge = new Int32Array(new SharedArrayBuffer(MAX_GROUPS * 4));
   groupWarehouseX = new Float32Array(new SharedArrayBuffer(MAX_GROUPS * 4));
   groupWarehouseY = new Float32Array(new SharedArrayBuffer(MAX_GROUPS * 4));
 
@@ -173,12 +198,22 @@ export function initializeSimulation(): void {
   ruleRegistry = new Int32Array(new SharedArrayBuffer(MAX_RULES * 8 * 4));
   for (let r = 0; r < MAX_RULES * 8; r++) ruleRegistry[r] = 0;
 
+  workerSync = new Int32Array(new SharedArrayBuffer(4 * 4)); // 4 slots for sync phases
+  
+  logicBytecode = new Int32Array(new SharedArrayBuffer(MAX_RULES * MAX_BYTECODE_PER_RULE * 4));
+  logicBytecode.fill(OP_END);
+
   groupPopulationCount = new Int32Array(new SharedArrayBuffer(MAX_GROUPS * 4));
   groupTotalWealth = new Int32Array(new SharedArrayBuffer(MAX_GROUPS * 4));
 
   worldMap = new Uint8Array(new SharedArrayBuffer(WORLD_MAP_COLS * WORLD_MAP_ROWS));
   globalFlowField = new Float32Array(new SharedArrayBuffer(WORLD_MAP_COLS * WORLD_MAP_ROWS * 2 * 4));
   integrationField = new Float32Array(WORLD_MAP_COLS * WORLD_MAP_ROWS);
+
+  influenceMap = new Int16Array(new SharedArrayBuffer(WORLD_MAP_COLS * WORLD_MAP_ROWS * 2));
+  territoryOwnerMap = new Int32Array(new SharedArrayBuffer(WORLD_MAP_COLS * WORLD_MAP_ROWS * 4));
+  territoryOwnerMap.fill(-1);
+  settlementTimerMap = new Int16Array(WORLD_MAP_COLS * WORLD_MAP_ROWS);
 
   generateBiomes();
 
@@ -403,6 +438,57 @@ function SummarySystem(): void {
   self.postMessage({ type: "STATS_UPDATE", payload: { totalActive } });
 }
 
+const logicStack = new Int8Array(16); // Fixed stack for VM
+
+function evaluateCompoundRule(ruleIdx: number): boolean {
+  let sp = 0;
+  const baseOffset = ruleIdx * MAX_BYTECODE_PER_RULE;
+  const gid = ruleRegistry[ruleIdx * 8 + 1];
+
+  for (let i = 0; i < MAX_BYTECODE_PER_RULE; i++) {
+    const op = logicBytecode[baseOffset + i];
+    if (op === OP_END) break;
+
+    switch (op) {
+      case OP_POP_GT:
+        logicStack[sp++] = groupPopulationCount[gid] > logicBytecode[baseOffset + ++i] ? 1 : 0;
+        break;
+      case OP_WEALTH_LT:
+        logicStack[sp++] = groupTotalWealth[gid] < logicBytecode[baseOffset + ++i] ? 1 : 0;
+        break;
+      case OP_RELATION_LT: {
+        const otherGid = logicBytecode[baseOffset + ++i];
+        const threshold = logicBytecode[baseOffset + ++i];
+        logicStack[sp++] = groupRelationsMatrix[gid * MAX_GROUPS + otherGid] < threshold ? 1 : 0;
+        break;
+      }
+      case OP_DIST_GT: {
+        const targetX = logicBytecode[baseOffset + ++i];
+        const targetY = logicBytecode[baseOffset + ++i];
+        const threshold = logicBytecode[baseOffset + ++i];
+        const dx = groupWarehouseX[gid] - targetX, dy = groupWarehouseY[gid] - targetY;
+        logicStack[sp++] = (dx * dx + dy * dy > threshold * threshold) ? 1 : 0;
+        break;
+      }
+      case GATE_AND: {
+        const b = logicStack[--sp], a = logicStack[--sp];
+        logicStack[sp++] = (a && b) ? 1 : 0;
+        break;
+      }
+      case GATE_OR: {
+        const b = logicStack[--sp], a = logicStack[--sp];
+        logicStack[sp++] = (a || b) ? 1 : 0;
+        break;
+      }
+      case GATE_NOT: {
+        logicStack[sp-1] = logicStack[sp-1] ? 0 : 1;
+        break;
+      }
+    }
+  }
+  return sp > 0 ? logicStack[0] === 1 : false;
+}
+
 function RuleEvaluationSystem(): void {
   for (let gA = 0; gA < 50; gA++) {
     if (groupPopulationCount[gA] === 0) continue;
@@ -426,13 +512,17 @@ function RuleEvaluationSystem(): void {
     const actionState = ruleRegistry[baseIdx + 4];
     const targetX = ruleRegistry[baseIdx + 5];
     const targetY = ruleRegistry[baseIdx + 6];
+
     let conditionMet = false;
-    if (conditionType === 0) { if (groupPopulationCount[subjectId] > threshold) conditionMet = true; }
-    else if (conditionType === 1) { if (groupTotalWealth[subjectId] > threshold) conditionMet = true; }
-    else if (conditionType === 3) { if (groupTotalWealth[subjectId] < threshold) conditionMet = true; }
-    
-    if (conditionMet) {
-      if (actionState === 99) self.postMessage({ type: "SAVE_REQUEST" });
+    if (conditionType === 255) {
+      conditionMet = evaluateCompoundRule(r);
+    } else {
+      if (conditionType === 0) { if (groupPopulationCount[subjectId] > threshold) conditionMet = true; }
+      else if (conditionType === 1) { if (groupTotalWealth[subjectId] > threshold) conditionMet = true; }
+      else if (conditionType === 3) { if (groupTotalWealth[subjectId] < threshold) conditionMet = true; }
+    }
+
+    if (conditionMet) {      if (actionState === 99) self.postMessage({ type: "SAVE_REQUEST" });
       else {
         broadcastGroupCommand(subjectId, actionState, targetX, targetY);
         if (firstActiveLocationTargetX === -1) { firstActiveLocationTargetX = targetX; firstActiveLocationTargetY = targetY; }
@@ -450,6 +540,20 @@ function LifeSystem(): void {
     if (money[i] > 0) decayRate = 0;
     if (state[i] === EntityState.Harvesting || state[i] === EntityState.ReturningToDepot) decayRate = 0;
     if (tickCount % (60 + (i % 30)) === 0) health[i] -= decayRate;
+
+    // Territorial Attrition (Phase 18)
+    if (tickCount % 60 === 0) {
+      const tx = Math.floor(positionX[i] / TILE_SIZE), ty = Math.floor(positionY[i] / TILE_SIZE);
+      if (tx >= 0 && tx < WORLD_MAP_COLS && ty >= 0 && ty < WORLD_MAP_ROWS) {
+        const owner = territoryOwnerMap[ty * WORLD_MAP_COLS + tx];
+        const gid = groupAffiliations[i * 8];
+        if (owner !== -1 && owner !== gid) {
+           const rel = groupRelationsMatrix[gid * MAX_GROUPS + owner];
+           if (rel < -50) health[i] -= 2; // Attrition in enemy territory
+        }
+      }
+    }
+
     if (state[i] === EntityState.Harvesting && targetEntityId[i] !== -1) {
       if (tickCount % 4 === 0) { health[i]++; if (health[i] > 100) health[i] = 100; }
     }
@@ -477,14 +581,37 @@ function LifeSystem(): void {
   }
 }
 
+function waitForAll(phase: number): void {
+  const target = 4;
+  Atomics.add(workerSync, phase, 1);
+  while (Atomics.load(workerSync, phase) < target) { /* busy wait */ }
+}
+
 function SpatialUpdateSystem(): void {
-  spatialHead.fill(-1);
+  // Clear local domain in spatialHead + ghost cells (50px padding)
+  const startX = Math.max(0, Math.floor((minX - 100) / GRID_SIZE));
+  const endX = Math.min(GRID_COLS - 1, Math.floor((maxX + 100) / GRID_SIZE));
+  const startY = Math.max(0, Math.floor((minY - 100) / GRID_SIZE));
+  const endY = Math.min(GRID_ROWS - 1, Math.floor((maxY + 100) / GRID_SIZE));
+
+  for (let cy = startY; cy <= endY; cy++) {
+    for (let cx = startX; cx <= endX; cx++) {
+      spatialHead[cy * GRID_COLS + cx] = -1;
+    }
+  }
+
   for (let i = 0; i < MAX_ENTITIES; i++) {
-    let cellX = Math.floor(positionX[i] / GRID_SIZE);
-    let cellY = Math.floor(positionY[i] / GRID_SIZE);
+    if (state[i] === EntityState.Dead) continue;
+    let worldX = positionX[i], worldY = positionY[i];
+    // Ghost Cell Padding (50px)
+    if (worldX < minX - 50 || worldX >= maxX + 50 || worldY < minY - 50 || worldY >= maxY + 50) continue;
+
+    let cellX = Math.floor(worldX / GRID_SIZE);
+    let cellY = Math.floor(worldY / GRID_SIZE);
     cellX = Math.max(0, Math.min(GRID_COLS - 1, cellX));
     cellY = Math.max(0, Math.min(GRID_ROWS - 1, cellY));
     const cellIndex = cellY * GRID_COLS + cellX;
+    
     spatialNext[i] = spatialHead[cellIndex];
     spatialHead[cellIndex] = i;
   }
@@ -540,7 +667,11 @@ export function popNextEvent(entityId: number): number {
 
 function MovementSystem(): void {
   for (let i = 0; i < MAX_ENTITIES; i++) {
+    if (state[i] === EntityState.Dead) continue;
     const worldX = positionX[i]; const worldY = positionY[i];
+    // Domain Check
+    if (worldX < minX || worldX >= maxX || worldY < minY || worldY >= maxY) continue;
+
     const tileX = Math.floor(worldX / TILE_SIZE); const tileY = Math.floor(worldY / TILE_SIZE);
     const tileIndex = Math.min(WORLD_MAP_COLS * WORLD_MAP_ROWS - 1, Math.max(0, tileY * WORLD_MAP_COLS + tileX));
     let speedModifier = 1.0;
@@ -557,7 +688,10 @@ function MovementSystem(): void {
 
 function AutonomySystem(): void {
   for (let i = 0; i < MAX_ENTITIES; i++) {
-    if ((traitBitmask[i] & TRAIT_TREE) !== 0) continue;
+    if (state[i] === EntityState.Dead || (traitBitmask[i] & TRAIT_TREE) !== 0) continue;
+    // Domain Check
+    if (positionX[i] < minX || positionX[i] >= maxX || positionY[i] < minY || positionY[i] >= maxY) continue;
+
     if (actionTimer[i] > 0) {
       actionTimer[i]--;
     } else {
@@ -699,8 +833,17 @@ function CombatDamageSystem(attackerId: number, victimId: number, damageValue: n
   health[victimId] -= damageValue; targetEntityId[victimId] = -1; actionTimer[victimId] = 0;
   const groupA = groupAffiliations[attackerId * 8]; const groupB = groupAffiliations[victimId * 8];
   if (groupA !== -1 && groupB !== -1 && groupA !== groupB) {
+    let penalty = 5;
+    
+    // Border Friction (Phase 18)
+    const tx = Math.floor(positionX[victimId] / TILE_SIZE), ty = Math.floor(positionY[victimId] / TILE_SIZE);
+    if (tx >= 0 && tx < WORLD_MAP_COLS && ty >= 0 && ty < WORLD_MAP_ROWS) {
+      const owner = territoryOwnerMap[ty * WORLD_MAP_COLS + tx];
+      if (owner === groupB) penalty = 15; // Hitting someone in their home territory is a major escalation
+    }
+
     const idx = (groupB * MAX_GROUPS) + groupA;
-    groupRelationsMatrix[idx] = Math.max(-100, groupRelationsMatrix[idx] - 5);
+    groupRelationsMatrix[idx] = Math.max(-100, groupRelationsMatrix[idx] - penalty);
   }
   const baseIndex = victimId * 4;
   pendingEvents[baseIndex] = EVENT_HOSTILE_ATTACK; targetEntityId[victimId] = attackerId;
@@ -741,9 +884,10 @@ function TradeSystem(): void {
 function SteeringSystem(): void {
   for (let i = 0; i < MAX_ENTITIES; i++) {
     if ((traitBitmask[i] & TRAIT_TREE) !== 0) continue;
-    
-    if (state[i] === EntityState.ReportingIntel) {
-      const gid = groupAffiliations[i * 8];
+    // Domain Check
+    if (positionX[i] < minX || positionX[i] >= maxX || positionY[i] < minY || positionY[i] >= maxY) continue;
+
+    if (state[i] === EntityState.ReportingIntel) {      const gid = groupAffiliations[i * 8];
       if (gid === -1) { state[i] = EntityState.Idle; continue; }
       const wx = groupWarehouseX[gid]; const wy = groupWarehouseY[gid];
       const dx = wx - positionX[i]; const dy = wy - positionY[i];
@@ -881,28 +1025,182 @@ function SteeringSystem(): void {
   }
 }
 
+function InfluenceSystem(): void {
+  // 1. Decay
+  for (let i = 0; i < WORLD_MAP_COLS * WORLD_MAP_ROWS; i++) {
+    influenceMap[i] = Math.floor(influenceMap[i] * 0.9);
+  }
+
+  // 2. Accumulate (Tug-of-War)
+  for (let i = 0; i < MAX_ENTITIES; i++) {
+    if (state[i] === EntityState.Dead) continue;
+    const tileX = Math.floor(positionX[i] / TILE_SIZE);
+    const tileY = Math.floor(positionY[i] / TILE_SIZE);
+    if (tileX >= 0 && tileX < WORLD_MAP_COLS && tileY >= 0 && tileY < WORLD_MAP_ROWS) {
+      const idx = tileY * WORLD_MAP_COLS + tileX;
+      const gid = groupAffiliations[i * 8];
+      if (gid === -1) continue;
+
+      if (territoryOwnerMap[idx] === -1) {
+        territoryOwnerMap[idx] = gid;
+        influenceMap[idx] = 1;
+        settlementTimerMap[idx] = 0;
+      } else if (territoryOwnerMap[idx] === gid) {
+        influenceMap[idx] = Math.min(1000, influenceMap[idx] + 1);
+      } else {
+        influenceMap[idx]--;
+        if (influenceMap[idx] <= 0) {
+          territoryOwnerMap[idx] = gid;
+          influenceMap[idx] = 1;
+          settlementTimerMap[idx] = 0;
+        }
+      }
+    }
+  }
+
+  // 3. Ownership Threshold & Settlement (Step B)
+  for (let i = 0; i < WORLD_MAP_COLS * WORLD_MAP_ROWS; i++) {
+    const gid = territoryOwnerMap[i];
+    if (gid === -1) { settlementTimerMap[i] = 0; continue; }
+    
+    if (influenceMap[i] < 10) { 
+      territoryOwnerMap[i] = -1; 
+      settlementTimerMap[i] = 0; 
+      continue; 
+    }
+
+    // Settlement Logic: If influence > 100 for 5 cycles (300 ticks), and far from warehouse
+    if (influenceMap[i] > 100) {
+      settlementTimerMap[i]++;
+      if (settlementTimerMap[i] >= 5) { // 5 cycles of SummarySystem = 300 ticks
+        const tx = (i % WORLD_MAP_COLS) * TILE_SIZE + TILE_SIZE / 2;
+        const ty = Math.floor(i / WORLD_MAP_COLS) * TILE_SIZE + TILE_SIZE / 2;
+        const dx = tx - groupWarehouseX[gid], dy = ty - groupWarehouseY[gid];
+        if (dx * dx + dy * dy > 300 * 300) {
+           if (worldMap[i] === 0) worldMap[i] = 2; // Place Structure (Depot) if it's Grass
+           settlementTimerMap[i] = 0; // Reset timer
+        }
+      }
+    } else {
+      settlementTimerMap[i] = 0;
+    }
+  }
+}
+
 export function tick(): void {
   if (isPaused) return;
-  SpatialUpdateSystem(); GroupKnowledgeDecaySystem(); IntelReportingSystem();
-  if (tickCount % 60 === 0) { SummarySystem(); RuleEvaluationSystem(); TradeSystem(); }
-  LifeSystem(); AutonomySystem(); SteeringSystem(); MovementSystem(); tickCount++;
+
+  // Barrier 0: Ensure all workers start at the same time
+  if (quadrantIndex === 0) {
+    Atomics.store(workerSync, 0, 0); Atomics.store(workerSync, 1, 0); Atomics.store(workerSync, 2, 0);
+  }
+  waitForAll(0);
+
+  // Phase 1: Spatial & Intelligence peeking
+  SpatialUpdateSystem(); 
+  IntelReportingSystem();
+  
+  // Phase 1.5: Throttled Global Systems (Only quadrant 0 for consistency)
+  if (quadrantIndex === 0) {
+    SummarySystem(); 
+    if (tickCount % 60 === 0) { RuleEvaluationSystem(); TradeSystem(); InfluenceSystem(); }
+    GroupKnowledgeDecaySystem();
+  }
+
+  // Phase 2: Autonomy & Steering (Local entities)
+  LifeSystem(); 
+  AutonomySystem(); 
+  SteeringSystem();
+
+  // Barrier 1: Sync before movement to ensure all forces are calculated
+  waitForAll(1);
+
+  // Phase 3: Physical Movement
+  MovementSystem();
+
+  // Barrier 2: Sync before finishing to ensure positions are final
+  waitForAll(2);
+
+  tickCount++;
 }
 
 self.onmessage = (e: MessageEvent) => {
   const data = e.data; const type = data.type;
   if (type === "INIT") {
-    initializeSimulation();
-    self.postMessage({ type: "INITIALIZED", buffers: { 
-      positionX: positionX.buffer, positionY: positionY.buffer, velocityX: velocityX.buffer, velocityY: velocityY.buffer,
-      health: health.buffer, money: money.buffer, state: state.buffer, actionTimer: actionTimer.buffer, traitBitmask: traitBitmask.buffer,
-      targetEntityId: targetEntityId.buffer, pendingEvents: pendingEvents.buffer, groupAffiliations: groupAffiliations.buffer,
-      activeCommandPriority: activeCommandPriority.buffer, activePrioritySlot: activePrioritySlot.buffer,
-      groupTargetEntityId: groupTargetEntityId.buffer, groupTargetX: groupTargetX.buffer, groupTargetY: groupTargetY.buffer, groupTargetAge: groupTargetAge.buffer,
-      ruleRegistry: ruleRegistry.buffer, groupPopulationCount: groupPopulationCount.buffer, groupTotalWealth: groupTotalWealth.buffer,
-      worldMap: worldMap.buffer, globalFlowField: globalFlowField.buffer,
-      entityInventory: entityInventory.buffer, groupWarehouseX: groupWarehouseX.buffer, groupWarehouseY: groupWarehouseY.buffer,
-      groupRelationsMatrix: groupRelationsMatrix.buffer, groupVisualArchetypes: groupVisualArchetypes.buffer
-    }});
+    quadrantIndex = data.payload.quadrantIndex;
+    if (quadrantIndex === 0) {
+        initializeSimulation();
+    } else {
+        // Slave workers map buffers from main
+        positionX = new Float32Array(data.payload.buffers.positionX);
+        positionY = new Float32Array(data.payload.buffers.positionY);
+        velocityX = new Float32Array(data.payload.buffers.velocityX);
+        velocityY = new Float32Array(data.payload.buffers.velocityY);
+        health = new Int32Array(data.payload.buffers.health);
+        money = new Int32Array(data.payload.buffers.money);
+        state = new Uint8Array(data.payload.buffers.state);
+        actionTimer = new Int16Array(data.payload.buffers.actionTimer);
+        traitBitmask = new Uint32Array(data.payload.buffers.traitBitmask);
+        targetEntityId = new Int32Array(data.payload.buffers.targetEntityId);
+        pendingEvents = new Int32Array(data.payload.buffers.pendingEvents);
+        groupAffiliations = new Int32Array(data.payload.buffers.groupAffiliations);
+        activeCommandPriority = new Uint8Array(data.payload.buffers.activeCommandPriority);
+        activePrioritySlot = new Int8Array(data.payload.buffers.activePrioritySlot);
+        groupTargetEntityId = new Int32Array(data.payload.buffers.groupTargetEntityId);
+        groupTargetX = new Float32Array(data.payload.buffers.groupTargetX);
+        groupTargetY = new Float32Array(data.payload.buffers.groupTargetY);
+        groupTargetAge = new Int32Array(data.payload.buffers.groupTargetAge);
+        ruleRegistry = new Int32Array(data.payload.buffers.ruleRegistry);
+        groupPopulationCount = new Int32Array(data.payload.buffers.groupPopulationCount);
+        groupTotalWealth = new Int32Array(data.payload.buffers.groupTotalWealth);
+        worldMap = new Uint8Array(data.payload.buffers.worldMap);
+        globalFlowField = new Float32Array(data.payload.buffers.globalFlowField);
+        entityInventory = new Int16Array(data.payload.buffers.entityInventory);
+        groupWarehouseX = new Float32Array(data.payload.buffers.groupWarehouseX);
+        groupWarehouseY = new Float32Array(data.payload.buffers.groupWarehouseY);
+        groupRelationsMatrix = new Int8Array(data.payload.buffers.groupRelationsMatrix);
+        groupVisualArchetypes = new Int8Array(data.payload.buffers.groupVisualArchetypes);
+        carriedIntelEntityId = new Int32Array(data.payload.buffers.carriedIntelEntityId);
+        carriedIntelX = new Float32Array(data.payload.buffers.carriedIntelX);
+        carriedIntelY = new Float32Array(data.payload.buffers.carriedIntelY);
+        mana = new Int16Array(data.payload.buffers.mana);
+        groupMagicFrequency = new Int8Array(data.payload.buffers.groupMagicFrequency);
+        influenceMap = new Int16Array(data.payload.buffers.influenceMap);
+        territoryOwnerMap = new Int32Array(data.payload.buffers.territoryOwnerMap);
+        logicBytecode = new Int32Array(data.payload.buffers.logicBytecode);
+        workerSync = new Int32Array(data.payload.buffers.workerSync);
+
+        // Phase 20: Local Spatial Hash (not shared)
+        spatialHead = new Int32Array(NUM_CELLS);
+        spatialHead.fill(-1);
+        spatialNext = new Int32Array(MAX_ENTITIES);
+        spatialNext.fill(-1);
+    }
+
+    // Set bounds based on quadrant
+    if (quadrantIndex === 0) { minX = 0; maxX = 800; minY = 0; maxY = 600; }
+    else if (quadrantIndex === 1) { minX = 800; maxX = 1600; minY = 0; maxY = 600; }
+    else if (quadrantIndex === 2) { minX = 0; maxX = 800; minY = 600; maxY = 1200; }
+    else if (quadrantIndex === 3) { minX = 800; maxX = 1600; minY = 600; maxY = 1200; }
+
+    if (quadrantIndex === 0) {
+        self.postMessage({ type: "INITIALIZED", buffers: { 
+          positionX: positionX.buffer, positionY: positionY.buffer, velocityX: velocityX.buffer, velocityY: velocityY.buffer,
+          health: health.buffer, money: money.buffer, state: state.buffer, actionTimer: actionTimer.buffer, traitBitmask: traitBitmask.buffer,
+          targetEntityId: targetEntityId.buffer, pendingEvents: pendingEvents.buffer, groupAffiliations: groupAffiliations.buffer,
+          activeCommandPriority: activeCommandPriority.buffer, activePrioritySlot: activePrioritySlot.buffer,
+          groupTargetEntityId: groupTargetEntityId.buffer, groupTargetX: groupTargetX.buffer, groupTargetY: groupTargetY.buffer, groupTargetAge: groupTargetAge.buffer,
+          ruleRegistry: ruleRegistry.buffer, groupPopulationCount: groupPopulationCount.buffer, groupTotalWealth: groupTotalWealth.buffer,
+          worldMap: worldMap.buffer, globalFlowField: globalFlowField.buffer,
+          entityInventory: entityInventory.buffer, groupWarehouseX: groupWarehouseX.buffer, groupWarehouseY: groupWarehouseY.buffer,
+          groupRelationsMatrix: groupRelationsMatrix.buffer, groupVisualArchetypes: groupVisualArchetypes.buffer,
+          carriedIntelEntityId: carriedIntelEntityId.buffer, carriedIntelX: carriedIntelX.buffer, carriedIntelY: carriedIntelY.buffer,
+          mana: mana.buffer, groupMagicFrequency: groupMagicFrequency.buffer,
+          influenceMap: influenceMap.buffer, territoryOwnerMap: territoryOwnerMap.buffer,
+          logicBytecode: logicBytecode.buffer,
+          workerSync: workerSync.buffer
+        }});
+    }
   }
   if (type === "TICK") { tick(); self.postMessage({ type: "TICK_COMPLETE" }); }
   if (type === "PAUSE_SIM") isPaused = true;
