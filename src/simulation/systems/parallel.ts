@@ -287,16 +287,19 @@ export function AutonomySystem(): void {
            const pop = S.groupPopulationCount[gid];
            const bldCount = S.groupBuildingCount[gid];
            const wealth = S.groupTotalWealth[gid];
-           if (pop > 0 && bldCount < (pop / 5) + 1 && wealth > 5000) {
+           const houseCapacity = Math.max(20, (bldCount - 1) * 5);
+           
+           if (pop > 0 && pop >= houseCapacity - 5 && wealth > 1500) {
              let foundSlot = -1;
              for(let b=0; b<C.MAX_BUILDINGS; b++) { if (S.bldType[b] === 0) { foundSlot = b; break; } }
              if (foundSlot !== -1) {
                S.bldType[foundSlot] = C.BuildingType.House;
-               S.bldPositionX[foundSlot] = S.positionX[i] + (Math.random() - 0.5) * 40;
-               S.bldPositionY[foundSlot] = S.positionY[i] + (Math.random() - 0.5) * 40;
-               S.bldHealth[foundSlot] = 50; S.bldGroup[foundSlot] = gid;
+               S.bldPositionX[foundSlot] = S.positionX[i] + (Math.random() - 0.5) * 80;
+               S.bldPositionY[foundSlot] = S.positionY[i] + (Math.random() - 0.5) * 80;
+               S.bldHealth[foundSlot] = 50; S.bldOwnerGroup[foundSlot] = gid;
                S.targetBuildingId[i] = foundSlot; S.state[i] = C.EntityState.Construction; S.actionTimer[i] = 120;
                Atomics.add(S.groupBuildingCount, gid, 1);
+               Atomics.sub(S.groupTotalWealth, gid, 1000); // Cost of building a house
                continue;
              }
            }

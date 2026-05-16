@@ -312,6 +312,7 @@ window.addEventListener('DOMContentLoaded', () => {
     let health: Int32Array, money: Int32Array, state: Uint8Array, entityInventory: Int16Array;
     let worldMap: Uint8Array, territoryOwnerMap: Int32Array, influenceMap: Int16Array, workerSync: Int32Array;
     let ruleRegistry: Int32Array, logicBytecode: Int32Array, groupPopulation: Int32Array, groupTotalWealth: Int32Array;
+    let groupWood: Int32Array, groupGold: Int32Array, groupFood: Int32Array, groupMisc: Int32Array;
     let bldPositionX: Float32Array, bldPositionY: Float32Array, bldType: Uint8Array, bldHealth: Int32Array, bldOwnerGroup: Int32Array;
     let vehPositionX: Float32Array, vehPositionY: Float32Array, vehType: Uint8Array, vehOwnerGroup: Int32Array;
 
@@ -511,7 +512,7 @@ window.addEventListener('DOMContentLoaded', () => {
             inventory: entityInventory[inspectEntityId],
             groups: Array.from(groupAffiliations.slice(inspectEntityId * 8, inspectEntityId * 8 + 8)).filter(g => g !== -1)
         };
-        root.render(<App ruleRegistry={ruleRegistry} logicBytecode={logicBytecode} groupPopulation={groupPopulation} groupTotalWealth={groupTotalWealth} tickCount={tickCount} lastTickTime={lastTickDuration} avgTickTime={avgTickDuration} inspectEntity={inspectEntity} chronicle={chronicle} onFollow={() => { followEntityId = inspectEntityId; }} onClearInspect={() => { inspectEntityId = -1; followEntityId = -1; }} />);
+        root.render(<App ruleRegistry={ruleRegistry} logicBytecode={logicBytecode} groupPopulation={groupPopulation} groupTotalWealth={groupTotalWealth} groupWood={groupWood} groupGold={groupGold} groupFood={groupFood} groupMisc={groupMisc} tickCount={tickCount} lastTickTime={lastTickDuration} avgTickTime={avgTickDuration} inspectEntity={inspectEntity} chronicle={chronicle} onFollow={() => { followEntityId = inspectEntityId; }} onClearInspect={() => { inspectEntityId = -1; followEntityId = -1; }} />);
     }
 
     workers.forEach((w, i) => {
@@ -519,7 +520,7 @@ window.addEventListener('DOMContentLoaded', () => {
         const { type, payload, buffers } = e.data;
         if (type === "INITIALIZED") {
           console.log("Worker 0 initialized, mapping buffers...");
-          positionX = new Float32Array(buffers.positionX); positionY = new Float32Array(buffers.positionY); traitBitmask = new Uint32Array(buffers.traitBitmask); groupAffiliations = new Int32Array(buffers.groupAffiliations); health = new Int32Array(buffers.health); money = new Int32Array(buffers.money); state = new Uint8Array(buffers.state); entityInventory = new Int16Array(buffers.entityInventory); worldMap = new Uint8Array(buffers.worldMap); territoryOwnerMap = new Int32Array(buffers.territoryOwnerMap); influenceMap = new Int16Array(buffers.influenceMap); workerSync = new Int32Array(buffers.workerSync); ruleRegistry = new Int32Array(buffers.ruleRegistry); logicBytecode = new Int32Array(buffers.logicBytecode); groupPopulation = new Int32Array(buffers.groupPopulationCount); groupTotalWealth = new Int32Array(buffers.groupTotalWealth);
+          positionX = new Float32Array(buffers.positionX); positionY = new Float32Array(buffers.positionY); traitBitmask = new Uint32Array(buffers.traitBitmask); groupAffiliations = new Int32Array(buffers.groupAffiliations); health = new Int32Array(buffers.health); money = new Int32Array(buffers.money); state = new Uint8Array(buffers.state); entityInventory = new Int16Array(buffers.entityInventory); worldMap = new Uint8Array(buffers.worldMap); territoryOwnerMap = new Int32Array(buffers.territoryOwnerMap); influenceMap = new Int16Array(buffers.influenceMap); workerSync = new Int32Array(buffers.workerSync); ruleRegistry = new Int32Array(buffers.ruleRegistry); logicBytecode = new Int32Array(buffers.logicBytecode); groupPopulation = new Int32Array(buffers.groupPopulationCount); groupTotalWealth = new Int32Array(buffers.groupTotalWealth); groupWood = new Int32Array(buffers.groupWood); groupGold = new Int32Array(buffers.groupGold); groupFood = new Int32Array(buffers.groupFood); groupMisc = new Int32Array(buffers.groupMisc);
           bldPositionX = new Float32Array(buffers.bldPositionX); bldPositionY = new Float32Array(buffers.bldPositionY); bldType = new Uint8Array(buffers.bldType); bldHealth = new Int32Array(buffers.bldHealth); bldOwnerGroup = new Int32Array(buffers.bldOwnerGroup);
           vehPositionX = new Float32Array(buffers.vehPositionX); vehPositionY = new Float32Array(buffers.vehPositionY); vehType = new Uint8Array(buffers.vehType); vehOwnerGroup = new Int32Array(buffers.vehOwnerGroup);
           workers.slice(1).forEach((sw, si) => sw.postMessage({ type: "INIT", payload: { quadrantIndex: si + 1, buffers } }));

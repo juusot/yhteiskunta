@@ -23,6 +23,10 @@ interface GroupStats {
   id: number;
   population: number;
   wealth: number;
+  wood: number;
+  gold: number;
+  food: number;
+  misc: number;
 }
 
 interface EntityInfo {
@@ -39,6 +43,10 @@ interface AppProps {
   logicBytecode: Int32Array | null;
   groupPopulation: Int32Array | null;
   groupTotalWealth: Int32Array | null;
+  groupWood: Int32Array | null;
+  groupGold: Int32Array | null;
+  groupFood: Int32Array | null;
+  groupMisc: Int32Array | null;
   tickCount: number;
   lastTickTime: number;
   avgTickTime: number;
@@ -53,6 +61,7 @@ const GATE_AND = 100, GATE_OR = 101, GATE_NOT = 102, OP_END = 255;
 
 export const App: React.FC<AppProps> = ({ 
   ruleRegistry, logicBytecode, groupPopulation, groupTotalWealth, 
+  groupWood, groupGold, groupFood, groupMisc,
   tickCount, lastTickTime, avgTickTime, inspectEntity, chronicle,
   onFollow, onClearInspect
 }) => {
@@ -74,16 +83,24 @@ export const App: React.FC<AppProps> = ({
 
   // Update stats
   useEffect(() => {
-    if (!groupPopulation || !groupTotalWealth) return;
+    if (!groupPopulation || !groupTotalWealth || !groupWood || !groupGold || !groupFood || !groupMisc) return;
     const newStats: GroupStats[] = [];
     for (let i = 0; i < 50; i++) {
       if (groupPopulation[i] > 0) {
-        newStats.push({ id: i, population: groupPopulation[i], wealth: groupTotalWealth[i] });
+        newStats.push({ 
+          id: i, 
+          population: groupPopulation[i], 
+          wealth: groupTotalWealth[i],
+          wood: groupWood[i],
+          gold: groupGold[i],
+          food: groupFood[i],
+          misc: groupMisc[i]
+        });
       }
     }
     newStats.sort((a, b) => b.population - a.population);
     setStats(newStats.slice(0, 20));
-  }, [tickCount, groupPopulation, groupTotalWealth]);
+  }, [tickCount, groupPopulation, groupTotalWealth, groupWood, groupGold, groupFood, groupMisc]);
 
   // Load rules
   useEffect(() => {
@@ -209,11 +226,17 @@ export const App: React.FC<AppProps> = ({
              <h2 className="bg-green-600 text-white px-2 py-1 text-sm font-bold uppercase mb-2">Group Demographics</h2>
             {stats.map(g => (
               <div key={g.id} className="bg-gray-100 p-2 border border-black">
-                <div className="flex justify-between items-center text-xs">
+                <div className="flex justify-between items-center text-xs border-b border-gray-300 pb-1 mb-1">
                   <span className="font-bold">Group {g.id}</span>
-                  <span>{g.population.toLocaleString()} entities</span>
+                  <span>{g.population.toLocaleString()} pop</span>
                 </div>
-                <div className="text-[10px] text-gray-600">Wealth: {g.wealth.toLocaleString()}</div>
+                <div className="text-[10px] text-gray-700 font-bold mb-1">Total Wealth: {g.wealth.toLocaleString()}</div>
+                <div className="grid grid-cols-2 gap-x-2 text-[10px] text-gray-600">
+                  <div className="flex justify-between"><span>Wood:</span> <span>{g.wood.toLocaleString()}</span></div>
+                  <div className="flex justify-between"><span>Gold:</span> <span>{g.gold.toLocaleString()}</span></div>
+                  <div className="flex justify-between"><span>Food:</span> <span>{g.food.toLocaleString()}</span></div>
+                  <div className="flex justify-between"><span>Misc:</span> <span>{g.misc.toLocaleString()}</span></div>
+                </div>
               </div>
             ))}
           </div>

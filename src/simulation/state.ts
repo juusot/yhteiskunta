@@ -74,6 +74,10 @@ export let logicBytecode: Int32Array;
 export let groupPopulationCount: Int32Array;
 export let groupBuildingCount: Int32Array;
 export let groupTotalWealth: Int32Array;
+export let groupWood: Int32Array;
+export let groupGold: Int32Array;
+export let groupFood: Int32Array;
+export let groupMisc: Int32Array;
 
 // Phase 11: Environmental Dynamics
 export let worldMap: Uint8Array;
@@ -164,6 +168,10 @@ export function initializeState(): void {
   groupPopulationCount = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   groupBuildingCount = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   groupTotalWealth = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
+  groupWood = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
+  groupGold = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
+  groupFood = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
+  groupMisc = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   worldMap = new Uint8Array(new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS));
   globalFlowField = new Float32Array(new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS * 2 * 4));
   influenceMap = new Int16Array(new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS * 2));
@@ -216,6 +224,10 @@ export function mapStateBuffers(buffers: any): void {
   groupPopulationCount = new Int32Array(buffers.groupPopulationCount);
   groupBuildingCount = new Int32Array(buffers.groupBuildingCount);
   groupTotalWealth = new Int32Array(buffers.groupTotalWealth);
+  groupWood = new Int32Array(buffers.groupWood);
+  groupGold = new Int32Array(buffers.groupGold);
+  groupFood = new Int32Array(buffers.groupFood);
+  groupMisc = new Int32Array(buffers.groupMisc);
   worldMap = new Uint8Array(buffers.worldMap);
   globalFlowField = new Float32Array(buffers.globalFlowField);
   entityInventory = new Int16Array(buffers.entityInventory);

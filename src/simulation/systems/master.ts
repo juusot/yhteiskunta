@@ -8,7 +8,11 @@ export function SummarySystem(): void {
 
   S.groupPopulationCount.fill(0);
   S.groupBuildingCount.fill(0);
-  S.groupTotalWealth.fill(0); // Reset for recount
+  S.groupTotalWealth.fill(0);
+  S.groupWood.fill(0);
+  S.groupGold.fill(0);
+  S.groupFood.fill(0);
+  S.groupMisc.fill(0);
   let totalActive = 0;
 
   for (let i = 0; i < C.MAX_ENTITIES; i++) {
@@ -17,6 +21,7 @@ export function SummarySystem(): void {
       if (gid >= 0 && gid < C.MAX_GROUPS) {
         S.groupPopulationCount[gid]++;
         S.groupTotalWealth[gid] += S.money[i];
+        S.groupGold[gid] += S.money[i]; // Money is counted as Gold
         totalActive++;
       }
     }
@@ -28,9 +33,12 @@ export function SummarySystem(): void {
       const gid = S.bldOwnerGroup[b];
       if (gid >= 0 && gid < C.MAX_GROUPS) {
         S.groupBuildingCount[gid]++;
-        // Simple sum: Wood + Gold + Food + Misc (all weighted 1 for simplicity now)
         const inv = S.bldInventory.slice(b * 4, b * 4 + 4);
         S.groupTotalWealth[gid] += inv[0] + inv[1] + inv[2] + inv[3];
+        S.groupWood[gid] += inv[0];
+        S.groupGold[gid] += inv[1];
+        S.groupFood[gid] += inv[2];
+        S.groupMisc[gid] += inv[3];
       }
     }
   }
@@ -53,11 +61,16 @@ export function SummarySystem(): void {
   for (let g = 0; g < C.MAX_GROUPS; g++) {
     const pop = S.groupPopulationCount[g];
     const wealth = S.groupTotalWealth[g];
+    const bldCount = S.groupBuildingCount[g];
     
     // Safety net for the 4 primary nations
     const needsSafetySpawn = g < 4 && pop < 20;
-    // Only allow reproduction if the group is established and wealthy
-    const canAffordReproduction = pop > 0 && wealth > 10000 && pop < 500;
+    
+    // House capacity: Warehouse provides 20, Houses provide 5 each
+    const houseCapacity = Math.max(20, (bldCount - 1) * 5);
+    
+    // Only allow reproduction if the group has capacity and wealth
+    const canAffordReproduction = pop > 0 && pop < houseCapacity && wealth > 1000;
     
     if (needsSafetySpawn || canAffordReproduction) {
       let births = 0;
