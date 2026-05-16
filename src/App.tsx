@@ -25,19 +25,38 @@ interface GroupStats {
   wealth: number;
 }
 
+interface EntityInfo {
+  id: number;
+  health: number;
+  money: number;
+  state: number;
+  inventory: number;
+  groups: number[];
+}
+
 interface AppProps {
   ruleRegistry: Int32Array | null;
   logicBytecode: Int32Array | null;
   groupPopulation: Int32Array | null;
   groupTotalWealth: Int32Array | null;
   tickCount: number;
+  lastTickTime: number;
+  avgTickTime: number;
+  inspectEntity: EntityInfo | null;
+  chronicle: string[];
+  onFollow: () => void;
+  onClearInspect: () => void;
 }
 
 const OP_POP_GT = 0, OP_WEALTH_LT = 1, OP_RELATION_LT = 2, OP_DIST_GT = 3;
 const GATE_AND = 100, GATE_OR = 101, GATE_NOT = 102, OP_END = 255;
 
-export const App: React.FC<AppProps> = ({ ruleRegistry, logicBytecode, groupPopulation, groupTotalWealth, tickCount }) => {
-  const [activeTab, setActiveTab] = useState<'stats' | 'rules'>('stats');
+export const App: React.FC<AppProps> = ({ 
+  ruleRegistry, logicBytecode, groupPopulation, groupTotalWealth, 
+  tickCount, lastTickTime, avgTickTime, inspectEntity, chronicle,
+  onFollow, onClearInspect
+}) => {
+  const [activeTab, setActiveTab] = useState<'monitor' | 'stats' | 'rules'>('monitor');
   const [stats, setStats] = useState<GroupStats[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [brushActive, setBrushActive] = useState(false);
@@ -53,17 +72,13 @@ export const App: React.FC<AppProps> = ({ ruleRegistry, logicBytecode, groupPopu
     };
   }, [brushActive, selectedGroupId, selectedTrait]);
 
-  // Update stats when tickCount changes
+  // Update stats
   useEffect(() => {
     if (!groupPopulation || !groupTotalWealth) return;
     const newStats: GroupStats[] = [];
-    for (let i = 0; i < 50; i++) { // Check first 50 groups
+    for (let i = 0; i < 50; i++) {
       if (groupPopulation[i] > 0) {
-        newStats.push({
-          id: i,
-          population: groupPopulation[i],
-          wealth: groupTotalWealth[i],
-        });
+        newStats.push({ id: i, population: groupPopulation[i], wealth: groupTotalWealth[i] });
       }
     }
     newStats.sort((a, b) => b.population - a.population);
@@ -89,15 +104,9 @@ export const App: React.FC<AppProps> = ({ ruleRegistry, logicBytecode, groupPopu
           }
       }
       newRules.push({
-        index: i,
-        subjectId: ruleRegistry[base + 1],
-        conditionType: ruleRegistry[base + 2],
-        threshold: ruleRegistry[base + 3],
-        actionState: ruleRegistry[base + 4],
-        targetX: ruleRegistry[base + 5],
-        targetY: ruleRegistry[base + 6],
-        enabled: ruleRegistry[base + 7] === 1,
-        nodes
+        index: i, subjectId: ruleRegistry[base + 1], conditionType: ruleRegistry[base + 2], threshold: ruleRegistry[base + 3],
+        actionState: ruleRegistry[base + 4], targetX: ruleRegistry[base + 5], targetY: ruleRegistry[base + 6],
+        enabled: ruleRegistry[base + 7] === 1, nodes
       });
     }
     setRules(newRules);
@@ -129,7 +138,6 @@ export const App: React.FC<AppProps> = ({ ruleRegistry, logicBytecode, groupPopu
       case 'enabled': ruleRegistry[base + 7] = value ? 1 : 0; break;
       case 'nodes': compileRule(index, value); break;
     }
-    // Update local state to reflect change immediately
     setRules(prev => prev.map(r => r.index === index ? { ...r, [field]: value } : r));
   };
 
@@ -142,54 +150,93 @@ export const App: React.FC<AppProps> = ({ ruleRegistry, logicBytecode, groupPopu
   };
 
   return (
-    <div className="fixed top-0 right-0 h-full w-80 bg-gray-900 text-white shadow-xl flex flex-col border-l border-gray-700 z-50 overflow-hidden">
-      <div className="flex border-b border-gray-700">
-        <button 
-          onClick={() => setActiveTab('stats')}
-          className={`flex-1 py-3 font-bold transition-colors ${activeTab === 'stats' ? 'bg-gray-800 text-green-400 border-b-2 border-green-400' : 'hover:bg-gray-800'}`}
-        >
-          Group Stats
-        </button>
-        <button 
-          onClick={() => setActiveTab('rules')}
-          className={`flex-1 py-3 font-bold transition-colors ${activeTab === 'rules' ? 'bg-gray-800 text-green-400 border-b-2 border-green-400' : 'hover:bg-gray-800'}`}
-        >
-          Rule Editor
-        </button>
+    <div className="h-full flex flex-col bg-white text-black font-mono">
+      {/* Tabs */}
+      <div className="flex border-b-2 border-black">
+        {(['monitor', 'stats', 'rules'] as const).map(tab => (
+          <button 
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`flex-1 py-2 text-xs font-bold transition-colors border-r-2 border-black last:border-r-0 ${activeTab === tab ? 'bg-yellow-400' : 'bg-white hover:bg-gray-100'}`}
+          >
+            {tab.toUpperCase()}
+          </button>
+        ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {activeTab === 'stats' ? (
-          <div className="space-y-2">
-            <h3 className="text-sm uppercase tracking-wider text-gray-400 font-bold mb-4">Live Demographics</h3>
-            {stats.map(g => (
-              <div key={g.id} className="bg-gray-800 p-3 rounded border border-gray-700">
-                <div className="flex justify-between items-center">
-                  <span className="font-bold text-green-400">Group {g.id}</span>
-                  <span className="text-xs text-gray-400">{g.population.toLocaleString()} entities</span>
+      <div className="flex-1 overflow-y-auto p-3 space-y-4">
+        {activeTab === 'monitor' && (
+          <div className="space-y-4">
+            <section>
+              <h2 className="bg-blue-600 text-white px-2 py-1 text-sm font-bold uppercase mb-2">Simulation Status</h2>
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between border-b border-gray-200"><span>Population</span><span className="font-bold">{stats.reduce((a,b)=>a+b.population, 0).toLocaleString()}</span></div>
+                <div className="flex justify-between border-b border-gray-200"><span>Last Tick</span><span className="font-bold">{lastTickTime.toFixed(1)}ms</span></div>
+                <div className="flex justify-between border-b border-gray-200"><span>Avg Tick</span><span className="font-bold">{avgTickTime.toFixed(1)}ms</span></div>
+              </div>
+            </section>
+
+            {inspectEntity && (
+              <section>
+                <h2 className="bg-red-600 text-white px-2 py-1 text-sm font-bold uppercase mb-2">Entity Inspector</h2>
+                <div className="bg-gray-100 p-2 border-2 border-black text-xs space-y-1">
+                  <div className="flex justify-between"><span>ID</span><span className="font-bold">{inspectEntity.id}</span></div>
+                  <div className="flex justify-between"><span>Health</span><span className="font-bold">{inspectEntity.health}</span></div>
+                  <div className="flex justify-between"><span>Money</span><span className="font-bold">{inspectEntity.money}</span></div>
+                  <div className="flex justify-between"><span>State</span><span className="font-bold">{inspectEntity.state}</span></div>
+                  <div className="flex justify-between"><span>Inv</span><span className="font-bold">{inspectEntity.inventory}</span></div>
+                  <div className="pt-1"><strong>Groups:</strong> {inspectEntity.groups.join(", ")}</div>
                 </div>
-                <div className="text-sm text-gray-300">Wealth: {g.wealth.toLocaleString()}</div>
+                <div className="flex gap-2 mt-2">
+                  <button onClick={onFollow} className="flex-1 py-1 text-[10px] bg-blue-500 text-white border-2 border-black">FOLLOW</button>
+                  <button onClick={onClearInspect} className="flex-1 py-1 text-[10px] bg-red-500 text-white border-2 border-black">CLEAR</button>
+                </div>
+              </section>
+            )}
+
+            <section>
+              <h2 className="bg-pink-500 text-white px-2 py-1 text-sm font-bold uppercase mb-2">Chronicle</h2>
+              <div className="bg-white border border-black p-2 h-48 overflow-y-auto text-[10px] space-y-1 leading-tight">
+                {chronicle.map((line, i) => <div key={i} className="border-b border-gray-100">{line}</div>)}
+                {chronicle.length === 0 && <div className="text-gray-400 italic">No events recorded.</div>}
+              </div>
+            </section>
+          </div>
+        )}
+
+        {activeTab === 'stats' && (
+          <div className="space-y-2">
+             <h2 className="bg-green-600 text-white px-2 py-1 text-sm font-bold uppercase mb-2">Group Demographics</h2>
+            {stats.map(g => (
+              <div key={g.id} className="bg-gray-100 p-2 border border-black">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="font-bold">Group {g.id}</span>
+                  <span>{g.population.toLocaleString()} entities</span>
+                </div>
+                <div className="text-[10px] text-gray-600">Wealth: {g.wealth.toLocaleString()}</div>
               </div>
             ))}
           </div>
-        ) : (
-          <div className="space-y-4">
-            <h3 className="text-sm uppercase tracking-wider text-gray-400 font-bold">Societal Rules</h3>
-            {rules.slice(0, 10).map(r => ( 
-              <div key={r.index} className="bg-gray-800 p-3 rounded border border-gray-700 space-y-2 text-sm">
-                <div className="flex justify-between items-center">
-                  <span className="font-bold">Rule #{r.index}</span>
-                  <input type="checkbox" checked={r.enabled} onChange={(e) => updateRule(r.index, 'enabled', e.target.checked)} className="w-4 h-4 accent-green-500" />
+        )}
+
+        {activeTab === 'rules' && (
+          <div className="space-y-3">
+            <h2 className="bg-yellow-500 text-black px-2 py-1 text-sm font-bold uppercase mb-2">Societal Rules</h2>
+            {rules.slice(0, 8).map(r => ( 
+              <div key={r.index} className="bg-gray-50 p-2 border-2 border-black space-y-1 text-[10px]">
+                <div className="flex justify-between items-center border-b border-black pb-1">
+                  <span className="font-bold">RULE #{r.index}</span>
+                  <input type="checkbox" checked={r.enabled} onChange={(e) => updateRule(r.index, 'enabled', e.target.checked)} className="accent-black" />
                 </div>
                 
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-xs text-gray-500 block">Group</label>
-                    <input type="number" value={r.subjectId} onChange={(e) => updateRule(r.index, 'subjectId', parseInt(e.target.value))} className="bg-gray-700 w-full px-2 py-1 rounded" />
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <label className="block text-[8px] uppercase">Gid</label>
+                    <input type="number" value={r.subjectId} onChange={(e) => updateRule(r.index, 'subjectId', parseInt(e.target.value))} className="w-full border border-black px-1" />
                   </div>
-                  <div>
-                    <label className="text-xs text-gray-500 block">Action</label>
-                    <select value={r.actionState} onChange={(e) => updateRule(r.index, 'actionState', parseInt(e.target.value))} className="bg-gray-700 w-full px-2 py-1 rounded" >
+                  <div className="flex-1">
+                    <label className="block text-[8px] uppercase">Act</label>
+                    <select value={r.actionState} onChange={(e) => updateRule(r.index, 'actionState', parseInt(e.target.value))} className="w-full border border-black" >
                       <option value={1}>Harvest</option>
                       <option value={2}>Flee</option>
                       <option value={3}>Combat</option>
@@ -199,80 +246,61 @@ export const App: React.FC<AppProps> = ({ ruleRegistry, logicBytecode, groupPopu
                   </div>
                 </div>
 
-                <div className="border-t border-gray-700 pt-2 space-y-1">
-                    <div className="flex justify-between text-xs text-gray-400">
-                        <span>Compound Logic (RPN)</span>
+                <div className="pt-1 space-y-1">
+                    <div className="flex justify-between items-center bg-gray-200 px-1">
+                        <span className="text-[8px]">LOGIC</span>
                         <div className="flex gap-1">
-                            <button onClick={() => addNode(r.index, OP_POP_GT)} className="px-1 bg-gray-700 hover:bg-gray-600 rounded">POP+</button>
-                            <button onClick={() => addNode(r.index, OP_WEALTH_LT)} className="px-1 bg-gray-700 hover:bg-gray-600 rounded">W-</button>
-                            <button onClick={() => addNode(r.index, GATE_AND)} className="px-1 bg-blue-900 hover:bg-blue-800 rounded">AND</button>
-                            <button onClick={() => addNode(r.index, GATE_OR)} className="px-1 bg-blue-900 hover:bg-blue-800 rounded">OR</button>
-                            <button onClick={() => addNode(r.index, GATE_NOT)} className="px-1 bg-red-900 hover:bg-red-800 rounded">NOT</button>
+                            <button onClick={() => addNode(r.index, OP_POP_GT)} className="bg-white px-1 border border-black">P+</button>
+                            <button onClick={() => addNode(r.index, OP_WEALTH_LT)} className="bg-white px-1 border border-black">W-</button>
+                            <button onClick={() => addNode(r.index, GATE_AND)} className="bg-blue-200 px-1 border border-black">AND</button>
+                            <button onClick={() => addNode(r.index, GATE_OR)} className="bg-blue-200 px-1 border border-black">OR</button>
                         </div>
                     </div>
                     {r.nodes.map((n, ni) => (
-                        <div key={ni} className="flex items-center gap-1 bg-gray-900 p-1 rounded">
-                            <span className="text-blue-400 font-mono text-[10px] w-12">
-                                {n.op === 0 ? "POP_GT" : n.op === 1 ? "W_LT" : n.op === 100 ? "AND" : n.op === 101 ? "OR" : "OP"}
-                            </span>
+                        <div key={ni} className="flex items-center gap-1 bg-white p-0.5 border border-gray-300">
+                            <span className="w-10 font-bold">{n.op === 0 ? "POP>" : n.op === 1 ? "W<" : n.op === 100 ? "AND" : "OR"}</span>
                             {n.op < 100 && (
                                 <input type="number" value={n.val} onChange={(e) => {
                                     const next = [...r.nodes]; next[ni].val = parseInt(e.target.value);
                                     updateRule(r.index, 'nodes', next);
-                                }} className="bg-gray-800 px-1 w-16 text-xs" />
+                                }} className="border border-gray-300 w-12 text-center" />
                             )}
                             <button onClick={() => {
                                 const next = r.nodes.filter((_, i) => i !== ni);
                                 updateRule(r.index, 'nodes', next);
-                                if (next.length === 0) updateRule(r.index, 'conditionType', 0);
-                            }} className="ml-auto text-red-500">×</button>
+                            }} className="ml-auto text-red-500 font-bold">×</button>
                         </div>
                     ))}
                 </div>
-
-                <div className="grid grid-cols-2 gap-2 text-[10px] text-gray-500">
-                    <span>X: {r.targetX}</span>
-                    <span>Y: {r.targetY}</span>
-                </div>
               </div>
             ))}
-            <p className="text-xs text-gray-500 italic">Showing first 10 slots...</p>
           </div>
         )}
       </div>
 
-      <div className="bg-gray-800 p-4 border-t border-gray-700 space-y-3">
-        <h3 className="text-xs font-bold uppercase text-gray-400">Brush Tool (God Hand)</h3>
+      {/* God Hand Brush (Always visible at bottom) */}
+      <div className="bg-gray-100 p-3 border-t-2 border-black space-y-2">
+        <h3 className="text-[10px] font-bold uppercase">Brush (God Hand)</h3>
         <button 
           onClick={() => setBrushActive(!brushActive)}
-          className={`w-full py-2 rounded font-bold transition-colors ${brushActive ? 'bg-green-600 text-white shadow-inner' : 'bg-gray-700 hover:bg-gray-600'}`}
+          className={`w-full py-1 border-2 border-black font-bold text-xs ${brushActive ? 'bg-green-500 text-white' : 'bg-white hover:bg-gray-50'}`}
         >
-          {brushActive ? 'BRUSH ACTIVE' : 'ACTIVATE BRUSH'}
+          {brushActive ? 'BRUSH: ACTIVE' : 'ACTIVATE BRUSH'}
         </button>
         {brushActive && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="text-xs w-16">Group:</span>
-              <input 
-                type="number" 
-                value={selectedGroupId} 
-                onChange={(e) => setSelectedGroupId(parseInt(e.target.value))}
-                className="bg-gray-700 flex-1 px-2 py-1 rounded text-sm"
-              />
+          <div className="flex gap-2 text-[10px]">
+            <div className="flex-1">
+                <label className="block">GID</label>
+                <input type="number" value={selectedGroupId} onChange={(e) => setSelectedGroupId(parseInt(e.target.value))} className="w-full border border-black px-1" />
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs w-16">Trait:</span>
-              <select 
-                value={selectedTrait} 
-                onChange={(e) => setSelectedTrait(parseInt(e.target.value))}
-                className="bg-gray-700 flex-1 px-2 py-1 rounded text-sm"
-              >
-                <option value={0}>None</option>
-                <option value={1}>Tree</option>
-                <option value={2}>Aggressive</option>
-                <option value={4}>Scout</option>
-                <option value={8}>Fanatic</option>
-              </select>
+            <div className="flex-1">
+                <label className="block">TRAIT</label>
+                <select value={selectedTrait} onChange={(e) => setSelectedTrait(parseInt(e.target.value))} className="w-full border border-black" >
+                    <option value={0}>NONE</option>
+                    <option value={1}>TREE</option>
+                    <option value={2}>AGGRO</option>
+                    <option value={4}>SCOUT</option>
+                </select>
             </div>
           </div>
         )}

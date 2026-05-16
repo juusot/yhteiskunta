@@ -4,173 +4,121 @@
     <meta charset="UTF-8" />
     <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>High-Performance Simulation</title>
+    <title>Yhteiskunta - 100k Simulation</title>
     <script type="module" src="/src/main.tsx" defer></script>
     <style>
+      :root {
+        --color-bg: #ffffea; /* Pale Yellow */
+        --color-panel: #ffffff;
+        --color-text: #000000;
+        --color-primary: #ffeb3b; /* Yellow */
+        --color-accent1: #f44336; /* Red */
+        --color-accent2: #2196f3; /* Blue */
+        --color-accent3: #e91e63; /* Pink */
+        --border-width: 3px;
+      }
+
       body {
-        font-family: system-ui, -apple-system, sans-serif;
-        padding: 20px;
-        background-color: #1e1e1e;
-        color: #fff;
-      }
-      .panel {
-        background-color: #2a2a2a;
-        border: 1px solid #444;
-        border-radius: 8px;
-        padding: 20px;
-        margin-bottom: 20px;
-      }
-      .stats {
+        font-family: 'Courier New', Courier, monospace;
+        background-color: var(--color-bg);
+        color: var(--color-text);
+        margin: 0;
+        padding: 10px;
+        height: 100vh;
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 15px;
-        margin-top: 10px;
-      }
-      .stat-box {
-        background-color: #333;
-        padding: 15px;
-        border-radius: 6px;
-        text-align: center;
-      }
-      .stat-value {
-        font-size: 24px;
-        font-weight: bold;
-        color: #4CAF50;
-        margin-top: 5px;
-      }
-      .controls {
-        display: flex;
-        flex-wrap: wrap;
+        grid-template-columns: 1fr 350px;
+        grid-template-rows: auto 1fr;
         gap: 10px;
+        overflow: hidden;
       }
-      button {
-        background-color: #4CAF50;
-        color: white;
-        border: none;
-        padding: 10px 20px;
-        text-align: center;
-        text-decoration: none;
-        display: inline-block;
-        font-size: 14px;
-        border-radius: 4px;
-        cursor: pointer;
-        transition: background-color 0.3s;
-      }
-      button:hover {
-        background-color: #45a049;
-      }
-      button.secondary {
-        background-color: #2196F3;
-      }
-      button.secondary:hover {
-        background-color: #0b7dda;
-      }
-      button.danger {
-        background-color: #f44336;
-      }
-      button.danger:hover {
-        background-color: #da190b;
-      }
-      .canvas-container {
+
+      .top-bar {
+        grid-column: 1 / 2;
         display: flex;
-        justify-content: center;
-        margin-top: 20px;
-        width: 100%;
+        gap: 10px;
+        padding: 10px;
+        background: var(--color-panel);
+        border: var(--border-width) solid #000;
       }
-      #simCanvas {
-        background-color: #222;
-        max-width: 100%;
-        height: auto;
-        border: 1px solid #444;
-        border-radius: 4px;
+
+      .main-area {
+        grid-column: 1 / 2;
+        grid-row: 2 / 3;
+        background: #000;
+        border: var(--border-width) solid #000;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .side-panel {
+        grid-column: 2 / 3;
+        grid-row: 1 / 3;
+        background: var(--color-panel);
+        border: var(--border-width) solid #000;
+        overflow: hidden; /* Scroll handled in React */
+      }
+
+      canvas {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        image-rendering: pixelated;
+      }
+
+      button {
+        background: var(--color-primary);
+        color: #000;
+        border: 2px solid #000;
+        padding: 8px 12px;
+        font-weight: bold;
+        cursor: pointer;
+        text-transform: uppercase;
+        box-shadow: 4px 4px 0px #000;
+      }
+
+      button:active {
+        box-shadow: 0px 0px 0px #000;
+        transform: translate(4px, 4px);
+      }
+
+      button.secondary { background: var(--color-accent2); color: #fff; }
+      button.danger { background: var(--color-accent1); color: #fff; }
+
+      .speed-btn {
+        padding: 4px 8px;
+        font-size: 10px;
+        box-shadow: 2px 2px 0px #000;
+        background: #eee;
+      }
+      .speed-btn.active {
+        background: var(--color-primary);
+        box-shadow: inset 2px 2px 0px #000;
+        transform: translate(1px, 1px);
       }
     </style>
   </head>
   <body>
-    <div id="react-root"></div>
-    <div class="panel" id="inspector-panel" style="display: none;">
-      <h2>Entity Inspector</h2>
-      <div class="stats">
-        <div class="stat-box">
-          <div>Entity ID</div>
-          <div class="stat-value" id="inspect-id">-</div>
-        </div>
-        <div class="stat-box">
-          <div>Health</div>
-          <div class="stat-value" id="inspect-health">-</div>
-        </div>
-        <div class="stat-box">
-          <div>Wealth</div>
-          <div class="stat-value" id="inspect-money">-</div>
-        </div>
-        <div class="stat-box">
-          <div>State</div>
-          <div class="stat-value" id="inspect-state">-</div>
-        </div>
-        <div class="stat-box">
-          <div>Carried Resources</div>
-          <div class="stat-value" id="inspect-inventory">0</div>
-        </div>
-      </div>
-      <div style="margin-top: 15px;">
-        <strong>Group Affiliations:</strong> <span id="inspect-groups">-</span>
-      </div>
-      <div style="margin-top: 5px;">
-        <strong>Hostile Relations:</strong> <span id="inspect-hostility" style="color: #f44336; font-size: 0.9em;">-</span>
-      </div>
-      <div style="margin-top: 10px;">
-        <button id="btn-follow-entity" class="secondary">Follow Entity</button>
-        <button id="btn-clear-inspector" class="danger">Clear Selection</button>
-      </div>
-    </div>
+    <!-- Top Bar: Controls -->
+    <header class="top-bar">
+      <button id="btn-toggle-loop">Start Loop</button>
+      <button id="btn-single-step" class="secondary">Step</button>
+      <button id="btn-territory-toggle" class="secondary">PolMap</button>
+      <div style="width: 2px; background: #000; margin: 0 5px;"></div>
+      <button id="btn-speed-1" class="speed-btn active">1x</button>
+      <button id="btn-speed-2" class="speed-btn">2x</button>
+      <button id="btn-speed-4" class="speed-btn">4x</button>
+      <button id="btn-speed-max" class="speed-btn">MAX</button>
+      <div style="flex-grow: 1;"></div>
+      <button id="saveBtn">Save</button>
+      <button id="loadBtn">Load</button>
+    </header>
 
-    <div class="panel">
-      <h2>Simulation Performance</h2>
-      <div class="stats">
-        <div class="stat-box">
-          <div>Total Entities</div>
-          <div class="stat-value" id="stat-entities">100,000</div>
-        </div>
-        <div class="stat-box">
-          <div>Last Tick Time</div>
-          <div class="stat-value" id="stat-last-tick">0 ms</div>
-        </div>
-        <div class="stat-box">
-          <div>Avg Tick Time</div>
-          <div class="stat-value" id="stat-avg-tick">0 ms</div>
-        </div>
-        <div class="stat-box">
-          <div>Min Tick (Window)</div>
-          <div class="stat-value" id="minTickDisplay">0 ms</div>
-        </div>
-        <div class="stat-box">
-          <div>Max Tick (Window)</div>
-          <div class="stat-value" id="maxTickDisplay">0 ms</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="panel">
-      <h2>Simulation Controls</h2>
-      <div class="controls">
-        <button id="btn-toggle-loop">Start Loop</button>
-        <button id="btn-single-step" class="secondary">Single Step Tick</button>
-        <button id="btn-territory-toggle" class="secondary">Show Political Map</button>
-        <button id="btn-nation-command" class="danger">Issue Nation Command</button>
-        <button id="btn-army-command" class="danger">Issue Army Command</button>
-      </div>
-    </div>
-
-    <div class="panel">
-      <h2>Persistence</h2>
-      <div class="controls">
-        <button id="saveBtn">Save World</button>
-        <button id="loadBtn">Load World</button>
-      </div>
-    </div>
-
-    <div class="canvas-container">
+    <!-- Main Area: Map -->
+    <main class="main-area">
       <canvas id="simCanvas" width="1600" height="1200"></canvas>
-    </div>
+    </main>
+
+    <!-- Side Panel: React Mount Point -->
+    <aside class="side-panel" id="root"></aside>
   </body>
 </html>

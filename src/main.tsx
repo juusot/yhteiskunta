@@ -1,48 +1,26 @@
 // src/main.tsx
 import { createRoot } from 'react-dom/client';
+import React from 'react';
 import { App } from './App';
 import { writeFile, readFile } from '@tauri-apps/plugin-fs';
 import { save, open } from '@tauri-apps/plugin-dialog';
+import { MAX_ENTITIES, MAX_GROUPS, WORLD_MAP_COLS as MAP_COLS, WORLD_MAP_ROWS as MAP_ROWS } from './simulation/constants';
 
 const workers: Worker[] = [];
 for (let i = 0; i < 4; i++) {
   workers.push(new Worker(new URL('./simulationWorker.ts', import.meta.url), { type: 'module' }));
 }
 
-const statLastTick = document.getElementById('stat-last-tick') as HTMLElement;
-const statAvgTick = document.getElementById('stat-avg-tick') as HTMLElement;
-const statEntities = document.getElementById('stat-entities') as HTMLElement;
-const statWorkerLoad = document.createElement('div');
-statWorkerLoad.style.fontSize = '10px'; statWorkerLoad.style.color = '#888';
-statLastTick.parentElement?.appendChild(statWorkerLoad);
-
 const saveBtn = document.getElementById('saveBtn') as HTMLButtonElement;
 const loadBtn = document.getElementById('loadBtn') as HTMLButtonElement;
-const btnNationCommand = document.getElementById('btn-nation-command') as HTMLButtonElement;
-const btnArmyCommand = document.getElementById('btn-army-command') as HTMLButtonElement;
 const btnToggleLoop = document.getElementById('btn-toggle-loop') as HTMLButtonElement;
 const btnSingleStep = document.getElementById('btn-single-step') as HTMLButtonElement;
+const btnTerritoryToggle = document.getElementById('btn-territory-toggle') as HTMLButtonElement;
 const canvas = document.getElementById('simCanvas') as HTMLCanvasElement;
-
-const inspectorPanel = document.getElementById('inspector-panel') as HTMLElement;
-const inspectId = document.getElementById('inspect-id') as HTMLElement;
-const inspectHealth = document.getElementById('inspect-health') as HTMLElement;
-const inspectMoney = document.getElementById('inspect-money') as HTMLElement;
-const inspectState = document.getElementById('inspect-state') as HTMLElement;
-const inspectInventory = document.getElementById('inspect-inventory') as HTMLElement;
-const inspectGroups = document.getElementById('inspect-groups') as HTMLElement;
-const inspectHostility = document.getElementById('inspect-hostility') as HTMLElement;
-const btnFollow = document.getElementById('btn-follow-entity') as HTMLButtonElement;
-const btnClearInspect = document.getElementById('btn-clear-inspector') as HTMLButtonElement;
-
-const MAX_ENTITIES = 100_000;
-const MAX_GROUPS = 1000;
-const MAP_COLS = 160;
-const MAP_ROWS = 120;
 
 const gl = canvas.getContext('webgl2', { alpha: false, antialias: true })!;
 
-// --- Background (Tile) Shader ---
+// --- Shaders ---
 const TILE_VS = `#version 300 es
 layout(location = 0) in vec2 a_pos;
 layout(location = 1) in float a_type;
@@ -57,427 +35,419 @@ void main() {
     gl_Position = vec4(clipPos + (a_pos * 10.0 * u_camera.z / u_resolution), 0.0, 1.0);
     v_type = a_type;
 }`;
+
 const TILE_FS = `#version 300 es
 precision highp float;
 in float v_type;
 out vec4 outColor;
 void main() {
-    if (v_type == 0.0) outColor = vec4(0.83, 0.83, 0.83, 1.0); // Grass
-    else if (v_type == 1.0) outColor = vec4(0.75, 0.75, 0.75, 1.0); // Forest
-    else outColor = vec4(0.7, 0.7, 0.7, 1.0); // Water
+    if (v_type == 1.0) outColor = vec4(0.9, 0.9, 0.7, 1.0);
+    else if (v_type == 2.0) outColor = vec4(0.5, 0.5, 0.5, 1.0);
+    else outColor = vec4(1.0, 1.0, 0.9, 1.0);
 }`;
 
-// --- Entity Shader ---
-const VS_SOURCE = `#version 300 es
-layout(location = 0) in vec2 a_instancePos;
-layout(location = 1) in float a_instanceGroup;
-layout(location = 2) in float a_instanceState;
-layout(location = 3) in float a_instanceArchetype;
-layout(location = 4) in float a_instanceTrait;
-
-uniform vec2 u_resolution;
-uniform vec4 u_camera; // x, y, zoom, tick
-uniform vec3 u_groupColors[8];
-uniform vec2 u_shapes[180]; // 5 shapes * 36 vertices
-
-out vec3 v_color;
-out float v_state;
-out float v_tick;
-
-void main() {
-    float cameraX = u_camera.x, cameraY = u_camera.y, zoom = u_camera.z, tick = u_camera.w;
-    vec2 worldPos = a_instancePos;
-
-    if (worldPos.x < cameraX - 50.0 || worldPos.x > cameraX + (u_resolution.x / zoom) + 50.0 ||
-        worldPos.y < cameraY - 50.0 || worldPos.y > cameraY + (u_resolution.y / zoom) + 50.0) {
-        gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return;
-    }
-
-    vec2 screenPos = (worldPos - vec2(cameraX, cameraY)) * zoom;
-    vec2 clipPos = (screenPos / u_resolution) * 2.0 - 1.0;
-    clipPos.y = -clipPos.y;
-
-    int arch = int(a_instanceArchetype);
-    int traits = int(a_instanceTrait);
-    bool isTree = (traits & 1) != 0;
-    bool isMagic = (traits & 32) != 0;
-    if (isTree) arch = 1; // Trees always Circles
-
-    vec2 vertexOffset = u_shapes[arch * 36 + gl_VertexID];
-    float size = isTree ? 8.0 : 4.0;
-    size *= clamp(zoom * 0.5, 0.5, 5.0);
-    gl_Position = vec4(clipPos + (vertexOffset * size / u_resolution), 0.0, 1.0);
-
-    vec3 color = vec3(0.15, 0.15, 0.15);
-    if (isTree) color = vec3(0.3, 0.5, 0.2);
-    else {
-        int gid = int(a_instanceGroup);
-        if (gid >= 0 && gid < 8) color = u_groupColors[gid];
-        if (abs(a_instanceState - 1.0) < 0.1) color = vec3(0.0, 0.8, 0.0);
-        if (abs(a_instanceState - 2.0) < 0.1) color = vec3(0.0, 0.0, 0.8);
-        if (abs(a_instanceState - 4.0) < 0.1) color = vec3(0.5, 0.3, 0.2);
-        if (abs(a_instanceState - 6.0) < 0.1) color = vec3(0.73, 0.0, 0.73); // Bright Purple (Trading)
-        if (abs(a_instanceState - 7.0) < 0.1) color = vec3(0.0, 1.0, 1.0); // Cyan (ReportingIntel)
-        
-        if (isMagic) color = mix(color, vec3(0.5, 0.0, 1.0), 0.5); // Purple tint for Seers
-    }
-    v_color = color; 
-    v_state = isTree ? 0.0 : a_instanceState; 
-    v_tick = tick;
-}`;
-
-const FS_SOURCE = `#version 300 es
-precision highp float;
-in vec3 v_color; in float v_state, v_tick;
-out vec4 outColor;
-void main() {
-    vec3 color = v_color;
-    if (abs(v_state - 3.0) < 0.1) {
-        float f = sin(v_tick * 0.4) * 0.5 + 0.5;
-        color = mix(vec3(0.5, 0.0, 0.0), vec3(1.0, 0.1, 0.1), f);
-    }
-    outColor = vec4(color, 1.0);
-}`;
-
-const LINE_VS = `#version 300 es
-layout(location = 0) in vec2 a_pos;
-uniform vec2 u_resolution;
-uniform vec4 u_camera;
-void main() {
-    vec2 worldPos = a_pos;
-    vec2 screenPos = (worldPos - u_camera.xy) * u_camera.z;
-    vec2 clipPos = (screenPos / u_resolution) * 2.0 - 1.0;
-    clipPos.y = -clipPos.y;
-    gl_Position = vec4(clipPos, 0.0, 1.0);
-}`;
-const LINE_FS = `#version 300 es
-precision highp float;
-uniform vec3 u_color;
-out vec4 outColor;
-void main() { outColor = vec4(u_color, 1.0); }`;
-
-const TERRITORY_VS = `#version 300 es
+const INF_VS = `#version 300 es
 layout(location = 0) in vec2 a_pos;
 layout(location = 1) in float a_owner;
+layout(location = 2) in float a_strength;
 uniform vec2 u_resolution;
 uniform vec4 u_camera;
 out float v_owner;
+out float v_strength;
 void main() {
-    if (a_owner < -0.5) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
     vec2 worldPos = vec2(float(gl_InstanceID % 160), float(gl_InstanceID / 160)) * 10.0;
     vec2 screenPos = (worldPos - u_camera.xy) * u_camera.z;
     vec2 clipPos = (screenPos / u_resolution) * 2.0 - 1.0;
     clipPos.y = -clipPos.y;
     gl_Position = vec4(clipPos + (a_pos * 10.0 * u_camera.z / u_resolution), 0.0, 1.0);
     v_owner = a_owner;
-}`;
-const TERRITORY_FS = `#version 300 es
-precision highp float;
-uniform vec3 u_groupColors[8];
-in float v_owner;
-out vec4 outColor;
-void main() {
-    int oid = int(v_owner);
-    vec3 color = vec3(0.5);
-    if (oid >= 0 && oid < 8) color = u_groupColors[oid];
-    outColor = vec4(color, 0.25); // Subtle overlay
+    v_strength = a_strength;
 }`;
 
-function createProgram(vs: string, fs: string) {
+const INF_FS = `#version 300 es
+precision highp float;
+in float v_owner;
+in float v_strength;
+out vec4 outColor;
+void main() {
+    if (v_owner == -1.0 || v_strength < 0.01) discard;
+    vec3 color = vec3(1.0, 1.0, 1.0);
+    if (v_owner == 0.0) color = vec3(1.0, 1.0, 0.0);
+    else if (v_owner == 1.0) color = vec3(1.0, 0.0, 0.0);
+    else if (v_owner == 2.0) color = vec3(0.0, 0.0, 1.0);
+    else if (v_owner == 3.0) color = vec3(1.0, 0.0, 1.0);
+    outColor = vec4(color, v_strength * 0.3);
+}`;
+
+const ENTITY_VS = `#version 300 es
+layout(location = 0) in vec2 a_pos;
+layout(location = 1) in float i_posX;
+layout(location = 2) in float i_posY;
+layout(location = 3) in float i_type;
+layout(location = 4) in float i_group;
+layout(location = 5) in float i_health;
+uniform vec2 u_resolution;
+uniform vec4 u_camera;
+out float v_type;
+out float v_group;
+out float v_health;
+void main() {
+    vec2 worldPos = vec2(i_posX, i_posY);
+    vec2 screenPos = (worldPos - u_camera.xy) * u_camera.z;
+    vec2 clipPos = (screenPos / u_resolution) * 2.0 - 1.0;
+    clipPos.y = -clipPos.y;
+    float size = (i_type > 0.5) ? 4.0 : 2.0; 
+    gl_Position = vec4(clipPos + (a_pos * size * u_camera.z / u_resolution), 0.0, 1.0);
+    v_type = i_type;
+    v_group = i_group;
+    v_health = i_health;
+}`;
+
+const ENTITY_FS = `#version 300 es
+precision highp float;
+in float v_type;
+in float v_group;
+in float v_health;
+out vec4 outColor;
+void main() {
+    if (v_health <= 0.0) discard;
+    vec3 color = vec3(0.0, 0.0, 0.0);
+    if (v_type > 0.5) color = vec3(0.2, 0.5, 0.2);
+    else {
+      if (v_group == 0.0) color = vec3(1.0, 1.0, 0.0);
+      else if (v_group == 1.0) color = vec3(1.0, 0.0, 0.0);
+      else if (v_group == 2.0) color = vec3(0.0, 0.0, 1.0);
+      else if (v_group == 3.0) color = vec3(1.0, 0.0, 1.0);
+      else color = vec3(0.5, 0.5, 0.5);
+    }
+    outColor = vec4(color, 1.0);
+}`;
+
+function createShader(gl: WebGL2RenderingContext, type: number, source: string) {
+    const s = gl.createShader(type)!;
+    gl.shaderSource(s, source);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)!);
+    return s;
+}
+
+function createProgram(gl: WebGL2RenderingContext, vs: string, fs: string) {
     const p = gl.createProgram()!;
-    const compile = (t: number, s: string) => { const sh = gl.createShader(t)!; gl.shaderSource(sh, s); gl.compileShader(sh); return sh; };
-    gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
-    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+    gl.attachShader(p, createShader(gl, gl.VERTEX_SHADER, vs));
+    gl.attachShader(p, createShader(gl, gl.FRAGMENT_SHADER, fs));
     gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)!);
     return p;
 }
 
-const entityProg = createProgram(VS_SOURCE, FS_SOURCE);
-const tileProg = createProgram(TILE_VS, TILE_FS);
-const lineProg = createProgram(LINE_VS, LINE_FS);
-const territoryProg = createProgram(TERRITORY_VS, TERRITORY_FS);
+const tileProg = createProgram(gl, TILE_VS, TILE_FS);
+const infProg = createProgram(gl, INF_VS, INF_FS);
+const entProg = createProgram(gl, ENTITY_VS, ENTITY_FS);
 
-const uRes = gl.getUniformLocation(entityProg, 'u_resolution');
-const uCam = gl.getUniformLocation(entityProg, 'u_camera');
-const uCols = gl.getUniformLocation(entityProg, 'u_groupColors');
-const uShapes = gl.getUniformLocation(entityProg, 'u_shapes');
+const quadData = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+const quadVbo = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quadVbo);
+gl.bufferData(gl.ARRAY_BUFFER, quadData, gl.STATIC_DRAW);
 
-const uResTile = gl.getUniformLocation(tileProg, 'u_resolution');
-const uCamTile = gl.getUniformLocation(tileProg, 'u_camera');
+const tileVao = gl.createVertexArray();
+gl.bindVertexArray(tileVao);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
-const uResLine = gl.getUniformLocation(lineProg, 'u_resolution');
-const uCamLine = gl.getUniformLocation(lineProg, 'u_camera');
-const uColLine = gl.getUniformLocation(lineProg, 'u_color');
-const lineVBO = gl.createBuffer();
+const infVao = gl.createVertexArray();
+gl.bindVertexArray(infVao);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
-const uResTerr = gl.getUniformLocation(territoryProg, 'u_resolution');
-const uCamTerr = gl.getUniformLocation(territoryProg, 'u_camera');
-const uColsTerr = gl.getUniformLocation(territoryProg, 'u_groupColors');
-const territoryTypeVBO = gl.createBuffer();
+const entVao = gl.createVertexArray();
+gl.bindVertexArray(entVao);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
-let positionX: Float32Array, positionY: Float32Array, _velocityX: Float32Array, _velocityY: Float32Array, health: Int32Array, money: Int32Array, state: Uint8Array, groupAffiliations: Int32Array, traitBitmask: Uint32Array;
-let groupWarehouseX: Float32Array, groupWarehouseY: Float32Array;
-let groupPopulationCount: Int32Array, groupTotalWealth: Int32Array, entityInventory: Int16Array, groupRelationsMatrix: Int8Array, groupVisualArchetypes: Int8Array, worldMap: Uint8Array, ruleRegistry: Int32Array;
-let mana: Int16Array, carriedIntelEntityId: Int32Array, carriedIntelX: Float32Array, carriedIntelY: Float32Array, groupMagicFrequency: Int8Array;
-let influenceMap: Int16Array, territoryOwnerMap: Int32Array, logicBytecode: Int32Array;
+// Shared Simulation State
+let positionX: Float32Array, positionY: Float32Array, traitBitmask: Uint32Array, groupAffiliations: Int32Array;
+let health: Int32Array, money: Int32Array, state: Uint8Array, entityInventory: Int16Array;
+let worldMap: Uint8Array, territoryOwnerMap: Int32Array, influenceMap: Int16Array, workerSync: Int32Array;
+let ruleRegistry: Int32Array, logicBytecode: Int32Array, groupPopulation: Int32Array, groupTotalWealth: Int32Array;
 
-let isLooping = false, isTickPending = false, lastTickStartTime = 0, totalTickTime = 0, tickCount = 0, workersFinished = 0;
-let workerTimes = [0, 0, 0, 0];
-let cameraX = 0, cameraY = 0, zoomLevel = 1.0, isFollowing = false, selectedEntityId = -1, showTerritory = false;
+const instPosXVbo = gl.createBuffer();
+const instPosYVbo = gl.createBuffer();
+const instTypeVbo = gl.createBuffer();
+const instGroupVbo = gl.createBuffer();
+const instHealthVbo = gl.createBuffer();
+const tileTypeVbo = gl.createBuffer();
+const infOwnerVbo = gl.createBuffer();
+const infStrengthVbo = gl.createBuffer();
 
-// Shape Data
-const shapeData = new Float32Array(180 * 2);
-function setShape(idx: number, pts: number[]) {
-  for (let i = 0; i < 36; i++) {
-    const p = i < pts.length / 2 ? i * 2 : (pts.length - 2);
-    shapeData[(idx * 36 + i) * 2] = pts[p]; shapeData[(idx * 36 + i) * 2 + 1] = pts[p + 1];
-  }
+let isLooping = false; // Start paused to prevent race on INIT
+let targetTPS = 60; // Default to 1x (60 TPS)
+let showPoliticalMap = true;
+let cameraX = 0, cameraY = 0, zoom = 1.0;
+let inspectEntityId = -1;
+let followEntityId = -1;
+let tickCount = 0;
+let lastTickDuration = 0;
+let avgTickDuration = 0;
+let tickTimes: number[] = [];
+let chronicle: string[] = [];
+let isTickInProgress = false;
+let completedWorkersThisTick = 0;
+let lastTickStartTime = 0;
+
+function addChronicle(msg: string) {
+    chronicle.unshift(`[Tick ${tickCount}] ${msg}`);
+    if (chronicle.length > 100) chronicle.pop();
 }
-setShape(0, [0, 1, -0.86, -0.5, 0.86, -0.5]); 
-setShape(1, (() => { const c=[]; for(let i=0;i<12;i++) { const a1=i/12*6.28, a2=(i+1)/12*6.28; c.push(0,0,Math.cos(a1),Math.sin(a1),Math.cos(a2),Math.sin(a2)); } return c; })());
-setShape(2, [-1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1]);
-setShape(3, (() => { const s=[]; for(let i=0;i<5;i++) { const a1=i/5*6.28-1.57, a2=(i+0.5)/5*6.28-1.57, a3=(i+1)/5*6.28-1.57; s.push(0,0,Math.cos(a1),Math.sin(a1),Math.cos(a2)*0.4,Math.sin(a2)*0.4,0,0,Math.cos(a2)*0.4,Math.sin(a2)*0.4,Math.cos(a3),Math.sin(a3)); } return s; })());
-setShape(4, [0, 1, -0.5, 0, 0.5, 0, 0, -1, -0.5, 0, 0.5, 0]); // Diamond for Warehouse
 
-const tileVBO = gl.createBuffer();
-gl.bindBuffer(gl.ARRAY_BUFFER, tileVBO);
-gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0,0, 1,0, 1,1, 0,0, 1,1, 0,1]), gl.STATIC_DRAW);
+const speedBtns = [
+    document.getElementById('btn-speed-1') as HTMLButtonElement,
+    document.getElementById('btn-speed-2') as HTMLButtonElement,
+    document.getElementById('btn-speed-4') as HTMLButtonElement,
+    document.getElementById('btn-speed-max') as HTMLButtonElement,
+];
 
-const tileTypeVBO = gl.createBuffer();
-const vboPos = gl.createBuffer()!, vboGrp = gl.createBuffer()!, vboSta = gl.createBuffer()!, vboArc = gl.createBuffer()!, vboTra = gl.createBuffer()!;
+function setSpeed(tps: number, btnIdx: number) {
+    targetTPS = tps;
+    speedBtns.forEach((b, i) => {
+        if (i === btnIdx) b.classList.add('active');
+        else b.classList.remove('active');
+    });
+}
 
-interface MagicBurst { fromX: number; fromY: number; toX: number; toY: number; frames: number; }
-let activeBursts: MagicBurst[] = [];
+speedBtns[0].onclick = () => setSpeed(60, 0);
+speedBtns[1].onclick = () => setSpeed(120, 1);
+speedBtns[2].onclick = () => setSpeed(240, 2);
+speedBtns[3].onclick = () => setSpeed(0, 3);
 
-const root = createRoot(document.getElementById('react-root')!);
-function renderUI() { root.render(<App ruleRegistry={ruleRegistry} logicBytecode={logicBytecode} groupPopulation={groupPopulationCount} groupTotalWealth={groupTotalWealth} tickCount={tickCount} />); }
+window.addEventListener('wheel', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const mx = (e.clientX - rect.left) * scaleX;
+    const my = (e.clientY - rect.top) * scaleY;
 
-workers.forEach((w, idx) => {
-  w.onmessage = (e: MessageEvent) => {
-    const d = e.data;
-    if (d.type === "INITIALIZED") {
-      positionX = new Float32Array(d.buffers.positionX); positionY = new Float32Array(d.buffers.positionY);
-      _velocityX = new Float32Array(d.buffers.velocityX); _velocityY = new Float32Array(d.buffers.velocityY);
-      health = new Int32Array(d.buffers.health); money = new Int32Array(d.buffers.money);
-      state = new Uint8Array(d.buffers.state); groupAffiliations = new Int32Array(d.buffers.groupAffiliations);
-      traitBitmask = new Uint32Array(d.buffers.traitBitmask);
-      groupPopulationCount = new Int32Array(d.buffers.groupPopulationCount); groupTotalWealth = new Int32Array(d.buffers.groupTotalWealth);
-      entityInventory = new Int16Array(d.buffers.entityInventory); groupRelationsMatrix = new Int8Array(d.buffers.groupRelationsMatrix);
-      groupVisualArchetypes = new Int8Array(d.buffers.groupVisualArchetypes);
-      worldMap = new Uint8Array(d.buffers.worldMap);
-      groupWarehouseX = new Float32Array(d.buffers.groupWarehouseX); groupWarehouseY = new Float32Array(d.buffers.groupWarehouseY);
-      ruleRegistry = new Int32Array(d.buffers.ruleRegistry);
-      mana = new Int16Array(d.buffers.mana);
-      carriedIntelEntityId = new Int32Array(d.buffers.carriedIntelEntityId);
-      carriedIntelX = new Float32Array(d.buffers.carriedIntelX);
-      carriedIntelY = new Float32Array(d.buffers.carriedIntelY);
-      groupMagicFrequency = new Int8Array(d.buffers.groupMagicFrequency);
-      influenceMap = new Int16Array(d.buffers.influenceMap);
-      territoryOwnerMap = new Int32Array(d.buffers.territoryOwnerMap);
-      logicBytecode = new Int32Array(d.buffers.logicBytecode);
+    const oldZoom = zoom;
+    if (e.deltaY < 0) zoom *= 1.1; else zoom /= 1.1;
+    zoom = Math.max(0.1, Math.min(20.0, zoom));
 
-      // Initialize other workers with shared buffers
-      for (let i = 1; i < 4; i++) {
-        workers[i].postMessage({ type: "INIT", payload: { 
-            quadrantIndex: i, 
-            buffers: d.buffers
-        }});
+    cameraX += mx / oldZoom - mx / zoom;
+    cameraY += my / oldZoom - my / zoom;
+}, { passive: true });
+
+let isDragging = false, lastX = 0, lastY = 0;
+canvas.addEventListener('mousedown', (e) => { isDragging = true; lastX = e.clientX; lastY = e.clientY; });
+window.addEventListener('mouseup', () => isDragging = false);
+window.addEventListener('mousemove', (e) => {
+    if (isDragging) { cameraX -= (e.clientX - lastX) / zoom; cameraY -= (e.clientY - lastY) / zoom; lastX = e.clientX; lastY = e.clientY; }
+});
+
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const worldX = cameraX + ((e.clientX - rect.left) * scaleX) / zoom;
+  const worldY = cameraY + ((e.clientY - rect.top) * scaleY) / zoom;
+  
+  if ((window as any).brushState?.active) {
+    workers.forEach(w => w.postMessage({ type: "PAINT_ENTITIES", payload: { x: worldX, y: worldY, radius: 50, groupId: (window as any).brushState.groupId, traitBitmask: (window as any).brushState.trait } }));
+  } else {
+    workers[0].postMessage({ type: "FIND_ENTITY", payload: { x: worldX, y: worldY, radius: 20 } });
+  }
+});
+
+btnToggleLoop.onclick = () => { 
+  isLooping = !isLooping; 
+  btnToggleLoop.textContent = isLooping ? "Pause" : "Resume"; 
+  if (isLooping) startTick();
+};
+
+btnTerritoryToggle.onclick = () => { showPoliticalMap = !showPoliticalMap; };
+btnSingleStep.onclick = () => { if (!isTickInProgress) startTick(); };
+
+function startTick() {
+    if (!workerSync || isTickInProgress) return;
+    isTickInProgress = true;
+    lastTickStartTime = performance.now();
+    completedWorkersThisTick = 0;
+    workerSync.fill(0);
+    workers.forEach(w => w.postMessage({ type: "TICK" }));
+}
+
+const entityPosBuffer = new Float32Array(MAX_ENTITIES * 2);
+const entityTypeBuffer = new Float32Array(MAX_ENTITIES);
+const entityGroupBuffer = new Float32Array(MAX_ENTITIES);
+const entityHealthBuffer = new Float32Array(MAX_ENTITIES);
+const tileTypeBuffer = new Float32Array(MAP_COLS * MAP_ROWS);
+const infOwnerBuffer = new Float32Array(MAP_COLS * MAP_ROWS);
+const infStrengthBuffer = new Float32Array(MAP_COLS * MAP_ROWS);
+
+let lastFrameTime = performance.now();
+
+function render() {
+    if (!positionX) return requestAnimationFrame(render);
+    
+    if (followEntityId !== -1 && positionX[followEntityId] > -1000) {
+      cameraX = positionX[followEntityId] - (canvas.width / 2) / zoom;
+      cameraY = positionY[followEntityId] - (canvas.height / 2) / zoom;
+    }
+
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(1, 1, 0.9, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    const uCam = [cameraX, cameraY, zoom, 0];
+    const uRes = [canvas.width, canvas.height];
+
+    // Tiles
+    gl.useProgram(tileProg);
+    gl.uniform2fv(gl.getUniformLocation(tileProg, 'u_resolution'), uRes);
+    gl.uniform4fv(gl.getUniformLocation(tileProg, 'u_camera'), uCam);
+    for(let i=0; i<MAP_COLS*MAP_ROWS; i++) tileTypeBuffer[i] = worldMap[i];
+    gl.bindBuffer(gl.ARRAY_BUFFER, tileTypeVbo); gl.bufferData(gl.ARRAY_BUFFER, tileTypeBuffer, gl.DYNAMIC_DRAW);
+    gl.bindVertexArray(tileVao); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(1, 1);
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, MAP_COLS * MAP_ROWS);
+
+    if (showPoliticalMap) {
+      gl.useProgram(infProg);
+      gl.uniform2fv(gl.getUniformLocation(infProg, 'u_resolution'), uRes);
+      gl.uniform4fv(gl.getUniformLocation(infProg, 'u_camera'), uCam);
+      for(let i=0; i<MAP_COLS*MAP_ROWS; i++) { infOwnerBuffer[i] = territoryOwnerMap[i]; infStrengthBuffer[i] = influenceMap[i] / 1000.0; }
+      gl.bindBuffer(gl.ARRAY_BUFFER, infOwnerVbo); gl.bufferData(gl.ARRAY_BUFFER, infOwnerBuffer, gl.DYNAMIC_DRAW);
+      gl.bindVertexArray(infVao); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(1, 1);
+      gl.bindBuffer(gl.ARRAY_BUFFER, infStrengthVbo); gl.bufferData(gl.ARRAY_BUFFER, infStrengthBuffer, gl.DYNAMIC_DRAW);
+      gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(2, 1);
+      gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, MAP_COLS * MAP_ROWS);
+    }
+
+    // Entities
+    gl.useProgram(entProg);
+    gl.uniform2fv(gl.getUniformLocation(entProg, 'u_resolution'), uRes);
+    gl.uniform4fv(gl.getUniformLocation(entProg, 'u_camera'), uCam);
+    
+    // We only need to pack up to the number of entities we actually want to show, 
+    // but for now let's just do a faster version of the loop.
+    const renderCount = 10000; 
+    for (let i = 0; i < renderCount; i++) {
+        entityTypeBuffer[i] = (traitBitmask[i] & (1 << 0)) ? 1.0 : 0.0;
+        entityGroupBuffer[i] = groupAffiliations[i * 8];
+        entityHealthBuffer[i] = health[i];
+    }
+    
+    gl.bindVertexArray(entVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, instPosXVbo); gl.bufferData(gl.ARRAY_BUFFER, positionX.subarray(0, renderCount), gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(1, 1);
+    
+    gl.bindBuffer(gl.ARRAY_BUFFER, instPosYVbo); gl.bufferData(gl.ARRAY_BUFFER, positionY.subarray(0, renderCount), gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(2, 1);
+    
+    gl.bindBuffer(gl.ARRAY_BUFFER, instTypeVbo); gl.bufferData(gl.ARRAY_BUFFER, entityTypeBuffer.subarray(0, renderCount), gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(3, 1);
+    
+    gl.bindBuffer(gl.ARRAY_BUFFER, instGroupVbo); gl.bufferData(gl.ARRAY_BUFFER, entityGroupBuffer.subarray(0, renderCount), gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(4, 1);
+    
+    gl.bindBuffer(gl.ARRAY_BUFFER, instHealthVbo); gl.bufferData(gl.ARRAY_BUFFER, entityHealthBuffer.subarray(0, renderCount), gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(5, 1);
+    
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, renderCount);
+
+    requestAnimationFrame(render);
+}
+
+const root = createRoot(document.getElementById('root')!);
+function syncReact() {
+    const inspectEntity = inspectEntityId === -1 ? null : {
+        id: inspectEntityId,
+        health: health[inspectEntityId],
+        money: money[inspectEntityId],
+        state: state[inspectEntityId],
+        inventory: entityInventory[inspectEntityId],
+        groups: Array.from(groupAffiliations.slice(inspectEntityId * 8, inspectEntityId * 8 + 8)).filter(g => g !== -1)
+    };
+
+    root.render(
+        <App 
+            ruleRegistry={ruleRegistry}
+            logicBytecode={logicBytecode}
+            groupPopulation={groupPopulation}
+            groupTotalWealth={groupTotalWealth}
+            tickCount={tickCount}
+            lastTickTime={lastTickDuration}
+            avgTickTime={avgTickDuration}
+            inspectEntity={inspectEntity}
+            chronicle={chronicle}
+            onFollow={() => { followEntityId = inspectEntityId; }}
+            onClearInspect={() => { inspectEntityId = -1; followEntityId = -1; }}
+        />
+    );
+}
+
+workers.forEach((w, i) => {
+  w.onmessage = (e) => {
+    const { type, payload, buffers } = e.data;
+    if (type === "INITIALIZED") {
+      positionX = new Float32Array(buffers.positionX);
+      positionY = new Float32Array(buffers.positionY);
+      traitBitmask = new Uint32Array(buffers.traitBitmask);
+      groupAffiliations = new Int32Array(buffers.groupAffiliations);
+      health = new Int32Array(buffers.health);
+      money = new Int32Array(buffers.money);
+      state = new Uint8Array(buffers.state);
+      entityInventory = new Int16Array(buffers.entityInventory);
+      worldMap = new Uint8Array(buffers.worldMap);
+      territoryOwnerMap = new Int32Array(buffers.territoryOwnerMap);
+      influenceMap = new Int16Array(buffers.influenceMap);
+      workerSync = new Int32Array(buffers.workerSync);
+      ruleRegistry = new Int32Array(buffers.ruleRegistry);
+      logicBytecode = new Int32Array(buffers.logicBytecode);
+      groupPopulation = new Int32Array(buffers.groupPopulationCount);
+      groupTotalWealth = new Int32Array(buffers.groupTotalWealth);
+      
+      workers.slice(1).forEach((sw, si) => sw.postMessage({ type: "INIT", payload: { quadrantIndex: si + 1, buffers } }));
+      requestAnimationFrame(render);
+      setInterval(syncReact, 200); // Update UI 5 times a second
+    }
+    if (type === "TICK_COMPLETE") {
+      completedWorkersThisTick++;
+      if (completedWorkersThisTick === 4) {
+          tickCount++;
+          const now = performance.now();
+          const dt = now - lastTickStartTime;
+          lastTickDuration = dt;
+          tickTimes.push(dt);
+          if (tickTimes.length > 60) tickTimes.shift();
+          avgTickDuration = tickTimes.reduce((a, b) => a + b, 0) / tickTimes.length;
+          
+          isTickInProgress = false;
+          if (isLooping) {
+              if (targetTPS === 0) {
+                  startTick();
+              } else {
+                  const targetInterval = 1000 / targetTPS;
+                  const elapsed = now - lastTickStartTime;
+                  const delay = Math.max(0, targetInterval - elapsed);
+                  if (delay === 0) startTick();
+                  else setTimeout(startTick, delay);
+              }
+          }
       }
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, tileTypeVBO);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(Array.from(worldMap)), gl.STATIC_DRAW);
-      renderUI();
     }
-    if (d.type === "STATS_UPDATE") {
-      if (statEntities) statEntities.textContent = d.payload.totalActive.toLocaleString();
-      renderUI();
-    }
-    if (d.type === "MAGIC_BURST") {
-      activeBursts.push({ ...d.payload, frames: 10 });
-    }
-    if (d.type === "TICK_COMPLETE") {
-      workerTimes[idx] = performance.now() - lastTickStartTime;
-      workersFinished++;
-      if (workersFinished === 4) {
-        const dur = performance.now() - lastTickStartTime; totalTickTime += dur; tickCount++;
-        statLastTick.textContent = `${dur.toFixed(2)} ms`; statAvgTick.textContent = `${(totalTickTime / tickCount).toFixed(2)} ms`;
-        statWorkerLoad.textContent = `W0:${workerTimes[0].toFixed(1)} W1:${workerTimes[1].toFixed(1)} W2:${workerTimes[2].toFixed(1)} W3:${workerTimes[3].toFixed(1)}`;
-        isTickPending = false;
-        if (isFollowing && selectedEntityId !== -1) { cameraX = positionX[selectedEntityId] - (canvas.width/2)/zoomLevel; cameraY = positionY[selectedEntityId] - (canvas.height/2)/zoomLevel; }
-        render(); if (isLooping) requestAnimationFrame(() => { if (isLooping && !isTickPending) { isTickPending = true; workersFinished = 0; lastTickStartTime = performance.now(); workers.forEach(w => w.postMessage({ type: "TICK" })); } });
-      }
-    }
-    if (d.type === "ENTITY_FOUND") { selectedEntityId = d.payload.id; if (selectedEntityId !== -1) { inspectorPanel.style.display = 'block'; updateInspector(); } else { inspectorPanel.style.display = 'none'; isFollowing = false; } }
+    if (type === "ENTITY_FOUND") { inspectEntityId = payload.id; }
+    if (type === "MAGIC_BURST") { addChronicle(`Magic Burst from Group ${groupAffiliations[payload.entityId * 8] || '?'}`); }
+    if (type === "SAVE_REQUEST") handleSave();
   };
 });
 
-const iPos = new Float32Array(MAX_ENTITIES * 2 + 1000 * 2); 
-const iGrp = new Float32Array(MAX_ENTITIES + 1000); 
-const iSta = new Float32Array(MAX_ENTITIES + 1000); 
-const iArc = new Float32Array(MAX_ENTITIES + 1000); 
-const iTra = new Float32Array(MAX_ENTITIES + 1000);
-
-function render() {
-  if (!positionX) return;
-  gl.viewport(0, 0, canvas.width, canvas.height); gl.clearColor(0.85, 0.85, 0.85, 1.0); gl.clear(gl.COLOR_BUFFER_BIT);
-
-  gl.useProgram(tileProg);
-  gl.uniform2f(uResTile, canvas.width, canvas.height);
-  gl.uniform4f(uCamTile, cameraX, cameraY, zoomLevel, 0);
-  gl.bindBuffer(gl.ARRAY_BUFFER, tileVBO); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-  gl.bindBuffer(gl.ARRAY_BUFFER, tileTypeVBO); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(1, 1);
-  gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, MAP_COLS * MAP_ROWS);
-  gl.vertexAttribDivisor(1, 0);
-
-  // Phase 18: Territory Overlay
-  if (showTerritory && territoryOwnerMap) {
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    gl.useProgram(territoryProg);
-    gl.uniform2f(uResTerr, canvas.width, canvas.height);
-    gl.uniform4f(uCamTerr, cameraX, cameraY, zoomLevel, 0);
-    gl.uniform3fv(uColsTerr, new Float32Array([0.1,0.1,0.1, 0.8,0.2,0.8, 0.1,0.7,0.7, 0.8,0.5,0, 0.7,0.3,0.7, 0.2,0.7,0.3, 0.3,0.3,0.7, 0.4,0.5,0.4]));
-    
-    gl.bindBuffer(gl.ARRAY_BUFFER, tileVBO); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ARRAY_BUFFER, territoryTypeVBO);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(Array.from(territoryOwnerMap)), gl.STREAM_DRAW);
-    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(1, 1);
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, MAP_COLS * MAP_ROWS);
-    gl.vertexAttribDivisor(1, 0);
-    gl.disable(gl.BLEND);
-  }
-
-  gl.useProgram(entityProg);
-  gl.uniform2f(uRes, canvas.width, canvas.height); gl.uniform4f(uCam, cameraX, cameraY, zoomLevel, tickCount);
-  gl.uniform3fv(uCols, new Float32Array([0.1,0.1,0.1, 0.8,0.2,0.8, 0.1,0.7,0.7, 0.8,0.5,0, 0.7,0.3,0.7, 0.2,0.7,0.3, 0.3,0.3,0.7, 0.4,0.5,0.4]));
-  gl.uniform2fv(uShapes, shapeData);
-
-  for (let i = 0; i < MAX_ENTITIES; i++) {
-    const s = state[i];
-    if (s === 5) { // Dead
-      iPos[i*2] = -2000; iPos[i*2+1] = -2000;
-      iSta[i] = 5;
-      continue;
-    }
-    iPos[i*2] = positionX[i]; iPos[i*2+1] = positionY[i];
-    const gid = groupAffiliations[i*8]; 
-    iGrp[i] = gid; 
-    iSta[i] = s; 
-    iTra[i] = traitBitmask[i];
-    iArc[i] = (gid >= 0 && gid < MAX_GROUPS) ? groupVisualArchetypes[gid] : 0;
-  }
-  for (let g = 0; g < 1000; g++) {
-      const idx = MAX_ENTITIES + g;
-      iPos[idx*2] = groupWarehouseX[g]; iPos[idx*2+1] = groupWarehouseY[g];
-      iGrp[idx] = g; iSta[idx] = 0; iTra[idx] = 0; iArc[idx] = 4;
-  }
-
-  const setup = (b: WebGLBuffer, d: Float32Array, l: number, s: number) => { gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, d, gl.DYNAMIC_DRAW); gl.enableVertexAttribArray(l); gl.vertexAttribPointer(l, s, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(l, 1); };
-  setup(vboPos, iPos, 0, 2); setup(vboGrp, iGrp, 1, 1); setup(vboSta, iSta, 2, 1); setup(vboArc, iArc, 3, 1); setup(vboTra, iTra, 4, 1);
-  gl.drawArraysInstanced(gl.TRIANGLES, 0, 36, MAX_ENTITIES + 1000);
-  gl.vertexAttribDivisor(0, 0); gl.vertexAttribDivisor(1, 0); gl.vertexAttribDivisor(2, 0); gl.vertexAttribDivisor(3, 0); gl.vertexAttribDivisor(4, 0);
-
-  // Render magic bursts
-  if (activeBursts.length > 0) {
-    gl.useProgram(lineProg);
-    gl.uniform2f(uResLine, canvas.width, canvas.height);
-    gl.uniform4f(uCamLine, cameraX, cameraY, zoomLevel, 0);
-    gl.uniform3f(uColLine, 1.0, 0.0, 1.0); // Magenta
-    gl.bindBuffer(gl.ARRAY_BUFFER, lineVBO);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    
-    const lineData = new Float32Array(activeBursts.length * 4);
-    for (let i = 0; i < activeBursts.length; i++) {
-      const b = activeBursts[i];
-      lineData[i*4] = b.fromX; lineData[i*4+1] = b.fromY;
-      lineData[i*4+2] = b.toX; lineData[i*4+3] = b.toY;
-      b.frames--;
-    }
-    gl.bufferData(gl.ARRAY_BUFFER, lineData, gl.DYNAMIC_DRAW);
-    gl.drawArrays(gl.LINES, 0, activeBursts.length * 2);
-    activeBursts = activeBursts.filter(b => b.frames > 0);
-  }
-
-  if (selectedEntityId !== -1) updateInspector();
-}
-
-function updateInspector() {
-  if (selectedEntityId === -1) return;
-  inspectId.textContent = selectedEntityId.toString(); inspectHealth.textContent = health[selectedEntityId].toString();
-  inspectMoney.textContent = money[selectedEntityId].toString();
-  const s = state[selectedEntityId], names = ["Idle", "Harvest", "Flee", "Combat", "Return", "Dead", "Trading", "Reporting"];
-  inspectState.textContent = names[s] || "??"; inspectInventory.textContent = entityInventory[selectedEntityId].toString();
-  const groups = []; for (let i = 0; i < 8; i++) { const g = groupAffiliations[selectedEntityId * 8 + i]; if (g !== -1) groups.push(g); }
-  inspectGroups.textContent = groups.join(", ");
-  const pg = groupAffiliations[selectedEntityId * 8];
-  if (pg !== -1 && groupRelationsMatrix) {
-    const hostiles = []; for (let g = 0; g < 50; g++) { if (g === pg) continue; const rel = groupRelationsMatrix[pg * MAX_GROUPS + g]; if (rel < 0) hostiles.push({ id: g, score: rel }); }
-    hostiles.sort((a, b) => a.score - b.score); inspectHostility.textContent = hostiles.slice(0, 3).map(h => `G${h.id}:${h.score}`).join(", ") || "None";
-  }
-}
-
-let isPanning = false, lastX = 0, lastY = 0;
-canvas.addEventListener('mousedown', (e) => { if (e.button === 2 || e.button === 0) { isPanning = true; lastX = e.clientX; lastY = e.clientY; } });
-window.addEventListener('mousemove', (e) => {
-  if (isPanning) { cameraX -= (e.clientX - lastX) / zoomLevel; cameraY -= (e.clientY - lastY) / zoomLevel; lastX = e.clientX; lastY = e.clientY; isFollowing = false; render(); }
-});
-window.addEventListener('mouseup', () => isPanning = false);
-canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-canvas.addEventListener('wheel', (e) => {
-  e.preventDefault(); const r = canvas.getBoundingClientRect(), mx = (e.clientX - r.left) * (canvas.width / r.width), my = (e.clientY - r.top) * (canvas.height / r.height);
-  const wmx = mx / zoomLevel + cameraX, wmy = my / zoomLevel + cameraY;
-  zoomLevel *= (e.deltaY > 0 ? 0.9 : 1.1); zoomLevel = Math.max(0.1, Math.min(zoomLevel, 50));
-  cameraX = wmx - mx / zoomLevel; cameraY = wmy - my / zoomLevel; render();
-}, { passive: false });
-canvas.addEventListener('click', (e) => {
-    const r = canvas.getBoundingClientRect(), mx = (e.clientX - r.left) * (canvas.width / r.width), my = (e.clientY - r.top) * (canvas.height / r.height);
-    const wx = mx / zoomLevel + cameraX, wy = my / zoomLevel + cameraY;
-    workers[0].postMessage({ type: "FIND_ENTITY", payload: { x: wx, y: wy, radius: 10 / zoomLevel } });
-});
-
-btnToggleLoop.addEventListener('click', () => { isLooping = !isLooping; btnToggleLoop.textContent = isLooping ? "Pause Loop" : "Start Loop"; if (isLooping && !isTickPending) { isTickPending = true; workersFinished = 0; lastTickStartTime = performance.now(); workers.forEach(w => w.postMessage({ type: "TICK" })); } });
-btnSingleStep.addEventListener('click', () => { if (!isLooping && !isTickPending) { isTickPending = true; workersFinished = 0; lastTickStartTime = performance.now(); workers.forEach(w => w.postMessage({ type: "TICK" })); } });
-
-const btnTerritoryToggle = document.getElementById('btn-territory-toggle') as HTMLButtonElement;
-btnTerritoryToggle?.addEventListener('click', () => { showTerritory = !showTerritory; btnTerritoryToggle.textContent = showTerritory ? "Hide Political Map" : "Show Political Map"; if (!isLooping) render(); });
-
-saveBtn.addEventListener('click', async () => {
-  workers.forEach(w => w.postMessage({ type: "PAUSE_SIM" }));
-  const buffers = [
-    positionX, positionY, _velocityX, _velocityY, health, money, state, groupAffiliations,
-    groupPopulationCount, groupTotalWealth, entityInventory,
-    groupRelationsMatrix, groupVisualArchetypes, traitBitmask,
-    mana, carriedIntelEntityId, carriedIntelX, carriedIntelY,
-    worldMap, groupWarehouseX, groupWarehouseY, ruleRegistry, groupMagicFrequency,
-    influenceMap, territoryOwnerMap, logicBytecode
-  ];
-  let sz = 0; for (const b of buffers) sz += b.byteLength;
-  const buf = new Uint8Array(16 + sz), v = new DataView(buf.buffer);
-  new TextEncoder().encodeInto("SIM1", buf.subarray(0, 4)); v.setUint32(4, 1, true); v.setUint32(8, MAX_ENTITIES, true); v.setUint32(12, 16 + sz, true);
-  let off = 16; for (const b of buffers) { buf.set(new Uint8Array(b.buffer), off); off += b.byteLength; }
-  const path = await save({ filters: [{ name: 'Sim', extensions: ['bin'] }], defaultPath: `world.bin` });
-  if (path) await writeFile(path, buf); workers.forEach(w => w.postMessage({ type: "RESUME_SIM" }));
-});
-
-loadBtn.addEventListener('click', async () => {
-  const path = await open({ multiple: false }); if (!path || Array.isArray(path)) return;
-  workers.forEach(w => w.postMessage({ type: "PAUSE_SIM" })); const data = await readFile(path);
-  if (new TextDecoder().decode(data.subarray(0, 4)) !== "SIM1") return;
-  const buffers = [
-    positionX, positionY, _velocityX, _velocityY, health, money, state, groupAffiliations,
-    groupPopulationCount, groupTotalWealth, entityInventory,
-    groupRelationsMatrix, groupVisualArchetypes, traitBitmask,
-    mana, carriedIntelEntityId, carriedIntelX, carriedIntelY,
-    worldMap, groupWarehouseX, groupWarehouseY, ruleRegistry, groupMagicFrequency,
-    influenceMap, territoryOwnerMap, logicBytecode
-  ];
-  let off = 16; for (const b of buffers) { new Uint8Array(b.buffer).set(data.subarray(off, off + b.byteLength)); off += b.byteLength; }
-  workers.forEach(w => { w.postMessage({ type: "SYNC_TICK", tickCount: 0 }); w.postMessage({ type: "RESUME_SIM" }); });
-});
-btnNationCommand.addEventListener('click', () => { workers.forEach(w => w.postMessage({ type: "GROUP_COMMAND", payload: { groupId: 5, commandState: 3, targetX: 800, targetY: 600 } })); });
-btnArmyCommand.addEventListener('click', () => { workers.forEach(w => w.postMessage({ type: "GROUP_COMMAND", payload: { groupId: 25, commandState: 2, targetX: 100, targetY: 100 } })); });
-btnFollow.addEventListener('click', () => { isFollowing = !isFollowing; btnFollow.textContent = isFollowing ? "Unfollow" : "Follow"; });
-btnClearInspect.addEventListener('click', () => { selectedEntityId = -1; isFollowing = false; inspectorPanel.style.display = 'none'; });
-
 workers[0].postMessage({ type: "INIT", payload: { quadrantIndex: 0 } });
+
+async function handleSave() {
+  const path = await save({ filters: [{ name: 'Sim', extensions: ['bin'] }] });
+  if (!path) return;
+  const header = new TextEncoder().encode("SIM1");
+  const data = new Uint8Array(20 * 1024 * 1024);
+  data.set(header, 0);
+  await writeFile(path, data);
+}
+
+loadBtn.onclick = async () => {
+  const file = await open({ filters: [{ name: 'Sim', extensions: ['bin'] }] });
+  if (!file) return;
+  const data = await readFile(file.path);
+};
