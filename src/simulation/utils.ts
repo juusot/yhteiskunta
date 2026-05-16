@@ -170,7 +170,7 @@ export function waitForAll(phase: number): void {
  * @param ownerId - Optional owning group (for hierarchies)
  * @returns Group ID (0 to MAX_GROUPS-1)
  */
-export function createGroup(name: string, ownerId: number = -1): number {
+export function createGroup(name: string, _ownerId: number = -1): number {
   // Find empty slot
   for (let g = 0; g < C.MAX_GROUPS; g++) {
     if (S.groupPopulationCount[g] === 0 && S.groupBuildingCount[g] === 0) {
@@ -261,6 +261,50 @@ export function getGroupMembers(groupId: number): number[] {
     }
   }
   return members;
+}
+
+/**
+ * Check if a position is within a group's influence radius
+ * @param x - World X coordinate
+ * @param y - World Y coordinate
+ * @param groupId - Group ID to check
+ * @returns true if position is within group's influence
+ */
+export function isInGroupInfluence(x: number, y: number, groupId: number): boolean {
+  const tileX = Math.floor(x / C.TILE_SIZE);
+  const tileY = Math.floor(y / C.TILE_SIZE);
+  
+  if (tileX < 0 || tileX >= C.WORLD_MAP_COLS || tileY < 0 || tileY >= C.WORLD_MAP_ROWS) {
+    return false;
+  }
+  
+  const idx = tileY * C.WORLD_MAP_COLS + tileX;
+  
+  // Check if tile is owned by this group
+  if (S.territoryOwnerMap[idx] === groupId && S.influenceMap[idx] > 0) {
+    return true;
+  }
+  
+  // Also check nearby buildings directly (for more precise check)
+  for (let b = 0; b < C.MAX_BUILDINGS; b++) {
+    if (S.bldType[b] === 0 || S.bldHealth[b] <= 0 || S.bldOwnerGroup[b] !== groupId) continue;
+    
+    let radius = 0;
+    switch (S.bldType[b]) {
+      case C.BuildingType.Warehouse: radius = C.INFLUENCE_RADIUS_WAREHOUSE; break;
+      case C.BuildingType.House: radius = C.INFLUENCE_RADIUS_HOUSE; break;
+      case C.BuildingType.Tower: radius = C.INFLUENCE_RADIUS_TOWER; break;
+      default: continue;
+    }
+    
+    const dx = x - S.bldPositionX[b];
+    const dy = y - S.bldPositionY[b];
+    if (dx * dx + dy * dy <= radius * radius) {
+      return true;
+    }
+  }
+  
+  return false;
 }
 
 /**

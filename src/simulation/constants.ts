@@ -95,3 +95,13 @@ export const MAX_BYTECODE_PER_RULE = 32;
 // Phase 21: Group & Character Limits
 export const GROUP_SLOTS_PER_CHARACTER = 8;
 export const EVENT_SLOTS_PER_CHARACTER = 8;
+
+// Phase 22: Building Influence Radii (units)
+export const INFLUENCE_RADIUS_WAREHOUSE = 200;
+export const INFLUENCE_RADIUS_HOUSE = 80;
+export const INFLUENCE_RADIUS_TOWER = 150;
+export const INFLUENCE_RADIUS_FIELD = 0;
+export const INFLUENCE_RADIUS_WALL = 0;
+
+// Influence decay at border (per day)
+export const INFLUENCE_OVERLAP_PENALTY = 5;

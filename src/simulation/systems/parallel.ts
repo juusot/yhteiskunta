@@ -343,7 +343,56 @@ export function AutonomySystem(): void {
     }
     if (S.state[i] === C.EntityState.Combat) continue;
 
-    // === PRIORITY 4: IDLE / WANDER ===
+    // === PRIORITY 4: BUILDING (if needed) ===
+    // Characters can build Houses and Fields when conditions are met
+    if (gid >= 0 && gid < C.MAX_GROUPS && S.tickCount % 60 === 0) {  // Check every 60 ticks
+      const pop = S.groupPopulationCount[gid];
+      const wealth = S.groupTotalWealth[gid];
+      const food = S.groupFood[gid];
+      
+      // Check if we should build a Field (food production)
+      const needField = food < 100 && pop > 0;
+      const hasWood = wealth > 200;  // Assuming wood is part of wealth
+      
+      if (needField && hasWood) {
+        // Check if we already have a Field
+        let hasField = false;
+        for (let b = 0; b < C.MAX_BUILDINGS; b++) {
+          if (S.bldType[b] === C.BuildingType.Field && S.bldOwnerGroup[b] === gid) {
+            hasField = true; break;
+          }
+        }
+        
+        if (!hasField) {
+          // Find empty building slot
+          for (let b = 0; b < C.MAX_BUILDINGS; b++) {
+            if (S.bldType[b] === 0) {
+              // Check if position is within group influence
+              const buildX = S.groupWarehouseX[gid] + (Math.random() - 0.5) * 100;
+              const buildY = S.groupWarehouseY[gid] + (Math.random() - 0.5) * 100;
+              
+              if (U.isInGroupInfluence(buildX, buildY, gid)) {
+                S.bldType[b] = C.BuildingType.Field;
+                S.bldPositionX[b] = buildX;
+                S.bldPositionY[b] = buildY;
+                S.bldHealth[b] = 50;
+                S.bldOwnerGroup[b] = gid;
+                S.targetBuildingId[i] = b;
+                S.state[i] = C.EntityState.Construction;
+                S.actionTimer[i] = 120;
+                Atomics.add(S.groupBuildingCount, gid, 1);
+                Atomics.sub(S.groupTotalWealth, gid, 200);  // Wood cost
+                continue;  // Skip idle state
+              }
+              // If not in influence, don't build (silent fail)
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // === PRIORITY 5: IDLE / WANDER ===
     // Default state - do nothing, let groups drive progress
     // Characters only act on survival needs or explicit group commands
     S.state[i] = C.EntityState.Idle;

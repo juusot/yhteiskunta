@@ -130,7 +130,7 @@ window.addEventListener('DOMContentLoaded', () => {
         else if (v_owner == 1.0) color = vec3(1.0, 0.0, 0.0);
         else if (v_owner == 2.0) color = vec3(0.0, 0.0, 1.0);
         else if (v_owner == 3.0) color = vec3(1.0, 0.0, 1.0);
-        outColor = vec4(color, v_strength * 0.3);
+        outColor = vec4(color, v_strength * 0.08);
     }`;
 
     const ENTITY_VS = `#version 300 es
@@ -218,7 +218,7 @@ window.addEventListener('DOMContentLoaded', () => {
         vec2 screenPos = (worldPos - u_camera.xy) * u_camera.z;
         vec2 clipPos = (screenPos / u_resolution) * 2.0 - 1.0;
         clipPos.y = -clipPos.y;
-        float size = (i_type == 1.0) ? 24.0 : 12.0; // Warehouse is much larger
+        float size = (i_type == 1.0) ? 16.0 : 10.0; // Warehouse is slightly larger
         gl_Position = vec4(clipPos + (a_pos * size * u_camera.z / u_resolution), 0.0, 1.0);
         v_type = i_type; v_group = i_group; v_health = i_health; v_pos = a_pos;
     }`;

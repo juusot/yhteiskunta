@@ -348,60 +348,127 @@ export function TradeSystem(): void {
   }
 }
 
+/**
+ * InfluenceSystem - Building-based territorial influence
+ * 
+ * Buildings project circular influence radii:
+ * - Warehouse: 200 units (large starting area)
+ * - House: 80 units (residential expansion)
+ * - Tower: 150 units (military/cultural projection)
+ * - Field/Wall: 0 units (no expansion)
+ * 
+ * Overlapping influence creates diplomatic tension
+ */
 export function InfluenceSystem(): void {
-  for (let i = 0; i < C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS; i++) {
-    S.influenceMap[i] = Math.floor(S.influenceMap[i] * 0.9);
-  }
-
-  for (let i = 0; i < C.MAX_ENTITIES; i++) {
-    if (S.state[i] === C.EntityState.Dead) continue;
-    const tileX = Math.floor(S.positionX[i] / C.TILE_SIZE);
-    const tileY = Math.floor(S.positionY[i] / C.TILE_SIZE);
-    if (tileX >= 0 && tileX < C.WORLD_MAP_COLS && tileY >= 0 && tileY < C.WORLD_MAP_ROWS) {
-      const idx = tileY * C.WORLD_MAP_COLS + tileX;
-      const gid = S.groupAffiliations[i * 8];
-      if (gid === -1) continue;
-
-      if (S.territoryOwnerMap[idx] === -1) {
-        S.territoryOwnerMap[idx] = gid;
-        S.influenceMap[idx] = 1;
-        S.settlementTimerMap[idx] = 0;
-      } else if (S.territoryOwnerMap[idx] === gid) {
-        S.influenceMap[idx] = Math.min(1000, S.influenceMap[idx] + 1);
-      } else {
-        S.influenceMap[idx]--;
-        if (S.influenceMap[idx] <= 0) {
-          S.territoryOwnerMap[idx] = gid;
-          S.influenceMap[idx] = 1;
-          S.settlementTimerMap[idx] = 0;
-        }
-      }
-    }
-  }
-
-  for (let i = 0; i < C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS; i++) {
-    const gid = S.territoryOwnerMap[i];
-    if (gid === -1) { S.settlementTimerMap[i] = 0; continue; }
+  // Only run every 60 ticks (1 second) for performance
+  if (S.tickCount % 60 !== 0) return;
+  
+  // Clear influence map
+  S.influenceMap.fill(0);
+  S.territoryOwnerMap.fill(-1);
+  
+  // Project influence from all buildings
+  for (let b = 0; b < C.MAX_BUILDINGS; b++) {
+    if (S.bldType[b] === 0 || S.bldHealth[b] <= 0) continue;
     
-    if (S.influenceMap[i] < 10) { 
-      S.territoryOwnerMap[i] = -1; 
-      S.settlementTimerMap[i] = 0; 
-      continue; 
+    const gid = S.bldOwnerGroup[b];
+    if (gid === -1 || gid >= C.MAX_GROUPS) continue;
+    
+    // Get influence radius by building type
+    let radius = 0;
+    switch (S.bldType[b]) {
+      case C.BuildingType.Warehouse: radius = C.INFLUENCE_RADIUS_WAREHOUSE; break;
+      case C.BuildingType.House: radius = C.INFLUENCE_RADIUS_HOUSE; break;
+      case C.BuildingType.Tower: radius = C.INFLUENCE_RADIUS_TOWER; break;
+      default: radius = 0; // Fields, Walls don't project influence
     }
-
-    if (S.influenceMap[i] > 100) {
-      S.settlementTimerMap[i]++;
-      if (S.settlementTimerMap[i] >= 5) {
-        const tx = (i % C.WORLD_MAP_COLS) * C.TILE_SIZE + C.TILE_SIZE / 2;
-        const ty = Math.floor(i / C.WORLD_MAP_COLS) * C.TILE_SIZE + C.TILE_SIZE / 2;
-        const dx = tx - S.groupWarehouseX[gid], dy = ty - S.groupWarehouseY[gid];
-        if (dx * dx + dy * dy > 300 * 300) {
-           if (S.worldMap[i] === 0) S.worldMap[i] = 2;
-           S.settlementTimerMap[i] = 0;
+    
+    if (radius === 0) continue;
+    
+    // Project circular influence with distance falloff
+    const bldTileX = Math.floor(S.bldPositionX[b] / C.TILE_SIZE);
+    const bldTileY = Math.floor(S.bldPositionY[b] / C.TILE_SIZE);
+    const radiusTiles = Math.floor(radius / C.TILE_SIZE);
+    
+    for (let dy = -radiusTiles; dy <= radiusTiles; dy++) {
+      for (let dx = -radiusTiles; dx <= radiusTiles; dx++) {
+        const tileX = bldTileX + dx;
+        const tileY = bldTileY + dy;
+        
+        if (tileX < 0 || tileX >= C.WORLD_MAP_COLS || tileY < 0 || tileY >= C.WORLD_MAP_ROWS) continue;
+        
+        // Check if within circular radius
+        const distSq = dx * dx + dy * dy;
+        if (distSq > radiusTiles * radiusTiles) continue;
+        
+        const idx = tileY * C.WORLD_MAP_COLS + tileX;
+        const dist = Math.sqrt(distSq);
+        
+        // Calculate influence strength with linear falloff (1.0 at center, 0.0 at edge)
+        const falloff = 1.0 - (dist / radiusTiles);
+        const influenceStrength = Math.floor(falloff * 1000);
+        
+        // Add influence for this group (allow multiple groups to influence same tile)
+        // This creates the border overlap/tension mechanic
+        S.influenceMap[idx] = Math.max(S.influenceMap[idx], influenceStrength);
+        
+        // Only claim territory if unclaimed
+        if (S.territoryOwnerMap[idx] === -1) {
+          S.territoryOwnerMap[idx] = gid;
         }
       }
-    } else {
-      S.settlementTimerMap[i] = 0;
+    }
+  }
+  
+  // Check for border overlaps and apply diplomatic tension
+  checkBorderOverlaps();
+}
+
+/**
+ * Check for overlapping influence between groups
+ * Applies -5 relations/day for each overlapping tile
+ */
+function checkBorderOverlaps(): void {
+  // Track which groups overlap (to avoid double-counting)
+  const overlaps = new Set<number>();
+  
+  for (let i = 0; i < C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS; i++) {
+    if (S.influenceMap[i] <= 0) continue;
+    
+    // Check neighboring tiles for different group influence
+    const x = i % C.WORLD_MAP_COLS;
+    const y = Math.floor(i / C.WORLD_MAP_COLS);
+    const gid = S.territoryOwnerMap[i];
+    
+    // Check 4 adjacent tiles
+    const neighbors = [
+      { x: x - 1, y: y },
+      { x: x + 1, y: y },
+      { x: x, y: y - 1 },
+      { x: x, y: y + 1 }
+    ];
+    
+    for (const n of neighbors) {
+      if (n.x < 0 || n.x >= C.WORLD_MAP_COLS || n.y < 0 || n.y >= C.WORLD_MAP_ROWS) continue;
+      
+      const nIdx = n.y * C.WORLD_MAP_COLS + n.x;
+      const nGid = S.territoryOwnerMap[nIdx];
+      
+      if (nGid !== -1 && nGid !== gid && S.influenceMap[nIdx] > 0) {
+        // Border overlap detected!
+        const overlapKey = gid < nGid ? (gid * 1000 + nGid) : (nGid * 1000 + gid);
+        if (!overlaps.has(overlapKey)) {
+          overlaps.add(overlapKey);
+          
+          // Apply relation penalty (once per day per border pair)
+          if (S.tickCount % C.TICKS_PER_DAY === 0) {
+            const idxA = gid * C.MAX_GROUPS + nGid;
+            const idxB = nGid * C.MAX_GROUPS + gid;
+            S.groupRelationsMatrix[idxA] = Math.max(-100, S.groupRelationsMatrix[idxA] - C.INFLUENCE_OVERLAP_PENALTY);
+            S.groupRelationsMatrix[idxB] = Math.max(-100, S.groupRelationsMatrix[idxB] - C.INFLUENCE_OVERLAP_PENALTY);
+          }
+        }
+      }
     }
   }
 }
