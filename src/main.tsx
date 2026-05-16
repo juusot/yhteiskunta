@@ -354,6 +354,7 @@ window.addEventListener('DOMContentLoaded', () => {
         document.getElementById('btn-speed-1') as HTMLButtonElement,
         document.getElementById('btn-speed-2') as HTMLButtonElement,
         document.getElementById('btn-speed-4') as HTMLButtonElement,
+        document.getElementById('btn-speed-8') as HTMLButtonElement,
         document.getElementById('btn-speed-max') as HTMLButtonElement,
     ];
 
@@ -365,7 +366,8 @@ window.addEventListener('DOMContentLoaded', () => {
     speedBtns[0].onclick = () => setSpeed(60, 0);
     speedBtns[1].onclick = () => setSpeed(120, 1);
     speedBtns[2].onclick = () => setSpeed(240, 2);
-    speedBtns[3].onclick = () => setSpeed(0, 3);
+    speedBtns[3].onclick = () => setSpeed(480, 3);  // 8x speed
+    speedBtns[4].onclick = () => setSpeed(0, 4);
 
     window.addEventListener('wheel', (e) => {
         const rect = canvas.getBoundingClientRect();

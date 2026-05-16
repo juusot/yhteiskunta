@@ -43,15 +43,21 @@ export function SummarySystem(): void {
     }
   }
 
+  // Food consumption - only food matters for survival, not wealth
   const starvingGroups = new Uint8Array(C.MAX_GROUPS);
   for (let g = 0; g < C.MAX_GROUPS; g++) {
     const pop = S.groupPopulationCount[g];
     if (pop === 0) continue;
-    // Maintenance cost
-    const foodRequired = Math.max(1, Math.floor(pop * 0.2));
-    S.groupTotalWealth[g] -= foodRequired;
-    if (S.groupTotalWealth[g] <= 0) {
-      S.groupTotalWealth[g] = 0;
+    
+    // Only consume food if group has food reserves
+    if (S.groupFood[g] <= 0) continue;
+    
+    // 0.1 food per person per cycle
+    const foodRequired = Math.max(1, Math.floor(pop * 0.1));
+    if (S.groupFood[g] >= foodRequired) {
+      S.groupFood[g] -= foodRequired;
+    } else {
+      S.groupFood[g] = 0;
       starvingGroups[g] = 1;
     }
   }

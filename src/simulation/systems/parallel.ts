@@ -212,135 +212,137 @@ export function AutonomySystem(): void {
     if (S.positionY[i] < S.minY || S.positionY[i] > S.maxY) continue;
     if (S.positionY[i] === S.maxY && S.maxY < C.WORLD_HEIGHT) continue;
 
-    if (S.actionTimer[i] > 0) {
-      S.actionTimer[i]--;
-    } else {
-      if (S.state[i] === C.EntityState.Harvesting && S.targetEntityId[i] !== -1) {
-        S.entityInventory[i] += 10;
-        S.state[i] = C.EntityState.ReturningToDepot;
-        S.targetEntityId[i] = -1;
-        const gid = S.groupAffiliations[i * 8];
-        S.targetBuildingId[i] = U.findNearestOwnedBuilding(S.positionX[i], S.positionY[i], 2000, C.BuildingType.Warehouse, gid);
-        S.actionTimer[i] = 0; 
-        continue; 
-      }
-      if (S.state[i] === C.EntityState.ReturningToDepot) {
-         const nextEvent = S.pendingEvents[i * 4];
-         if (nextEvent === C.EVENT_HOSTILE_ATTACK) { U.popNextEvent(i); S.state[i] = C.EntityState.Fleeing; S.actionTimer[i] = 180; continue; }
-         
-         if (S.targetBuildingId[i] === -1 || S.bldHealth[S.targetBuildingId[i]] <= 0) {
-            const gid = S.groupAffiliations[i * 8];
-            S.targetBuildingId[i] = U.findNearestOwnedBuilding(S.positionX[i], S.positionY[i], 2000, C.BuildingType.Warehouse, gid);
-            if (S.targetBuildingId[i] === -1) { S.state[i] = C.EntityState.Idle; S.actionTimer[i] = 60; continue; }
-         }
-         continue; 
-      }
+    // === PRIORITY 1: SURVIVAL ===
+    // Check if character's group needs food urgently
+    const gid = S.groupAffiliations[i * 8];
+    let survivalTask: number = -1; // -1=none, 0=bush, 1=field
+    
+    if (gid >= 0 && gid < C.MAX_GROUPS) {
+      const groupFood = S.groupFood[gid];
+      const pop = S.groupPopulationCount[gid];
+      const foodNeeded = Math.max(1, Math.floor(pop * 0.1));
       
-      if (S.state[i] === C.EntityState.Construction) {
-         const bldId = S.targetBuildingId[i];
-         if (bldId !== -1 && S.bldHealth[bldId] < 1000) {
-            Atomics.add(S.bldHealth, bldId, 50);
-            if (S.bldHealth[bldId] >= 1000) {
-               S.bldHealth[bldId] = 1000;
-               S.state[i] = C.EntityState.Idle; S.actionTimer[i] = 60;
-            } else { S.actionTimer[i] = 120; }
-         } else { S.state[i] = C.EntityState.Idle; S.actionTimer[i] = 30; }
-         continue;
-      }
-
-      S.activePrioritySlot[i] = -1;
-      const nextEvent = S.pendingEvents[i * 4];
-      if (nextEvent !== -1) {
-        U.popNextEvent(i);
-        if (nextEvent === C.EVENT_HOSTILE_ATTACK) {
-          if ((S.traitBitmask[i] & C.TRAIT_AGGRESSIVE) !== 0) { S.state[i] = C.EntityState.Combat; S.actionTimer[i] = 120; }
-          else { S.state[i] = C.EntityState.Fleeing; S.actionTimer[i] = 180; }
-          S.activeCommandPriority[i] = 0; S.activePrioritySlot[i] = -1; continue;
-        }
-      }
-
-      if (S.state[i] === C.EntityState.Idle || S.activePrioritySlot[i] !== -1) {
-        const baseIdx = i * 8;
-        let foundHigherPriority = false;
-        
-        // Strict Hierarchy: Check Slot 0 first (Nation/Cult)
-        for (let s = 0; s < 8; s++) {
-          const groupId = S.groupAffiliations[baseIdx + s];
-          if (groupId !== -1) {
-            const targetId = S.groupTargetEntityId[groupId];
-            if (targetId !== -1) { 
-              S.targetEntityId[i] = targetId; S.state[i] = C.EntityState.Combat; S.actionTimer[i] = 300;
-              S.activeCommandPriority[i] = 8 - s; S.activePrioritySlot[i] = s; foundHigherPriority = true; break;
-            }
+      // Only act if food is critically low (< 5 cycles of food left)
+      if (groupFood > 0 && groupFood < foodNeeded * 5) {
+        // Try to find bushes first
+        const bushId = U.findNearest(S.positionX[i], S.positionY[i], 500, C.TRAIT_BUSH);
+        if (bushId !== -1) {
+          survivalTask = 0;
+          S.targetEntityId[i] = bushId;
+          S.targetBuildingId[i] = -1;
+        } else {
+          // Try fields
+          const fieldId = U.findNearestBuilding(S.positionX[i], S.positionY[i], 500, C.BuildingType.Field);
+          if (fieldId !== -1 && S.bldOwnerGroup[fieldId] === gid) {
+            survivalTask = 1;
+            S.targetBuildingId[i] = fieldId;
+            S.targetEntityId[i] = -1;
           }
         }
-        if (foundHigherPriority) continue;
-        if (S.state[i] !== C.EntityState.Idle) continue;
-
-        const rand = Math.random();
-        let nextState: number = C.EntityState.Idle;
-        const gid = S.groupAffiliations[i * 8];
-        
-        if (rand > 0.95) nextState = C.EntityState.Combat;
-        else if (rand > 0.9) nextState = C.EntityState.Fleeing;
-        else if (rand > 0.995 && gid >= 0 && gid < C.MAX_GROUPS) {
-           const pop = S.groupPopulationCount[gid];
-           const bldCount = S.groupBuildingCount[gid];
-           const wealth = S.groupTotalWealth[gid];
-           const houseCapacity = Math.max(20, (bldCount - 1) * 5);
-           
-           if (pop > 0 && pop >= houseCapacity - 5 && wealth > 1500) {
-             let foundSlot = -1;
-             for(let b=0; b<C.MAX_BUILDINGS; b++) { if (S.bldType[b] === 0) { foundSlot = b; break; } }
-             if (foundSlot !== -1) {
-               S.bldType[foundSlot] = C.BuildingType.House;
-               S.bldPositionX[foundSlot] = S.positionX[i] + (Math.random() - 0.5) * 80;
-               S.bldPositionY[foundSlot] = S.positionY[i] + (Math.random() - 0.5) * 80;
-               S.bldHealth[foundSlot] = 50; S.bldOwnerGroup[foundSlot] = gid;
-               S.targetBuildingId[i] = foundSlot; S.state[i] = C.EntityState.Construction; S.actionTimer[i] = 120;
-               Atomics.add(S.groupBuildingCount, gid, 1);
-               Atomics.sub(S.groupTotalWealth, gid, 1000); // Cost of building a house
-               continue;
-             }
-           }
-           nextState = C.EntityState.Idle;
-        }
-        else if (rand > 0.88 && S.isMounted[i] === 0) {
-           const vehId = U.findNearestVehicle(S.positionX[i], S.positionY[i], 300);
-           if (vehId !== -1 && S.vehHealth[vehId] > 0 && S.vehPilotId[vehId] === -1) {
-             S.targetVehicleId[i] = vehId;
-             nextState = C.EntityState.Idle; 
-           }
-        }
-        else if (rand > 0.7) nextState = C.EntityState.Harvesting;
-
-        if (nextState === C.EntityState.Idle) { S.state[i] = C.EntityState.Idle; S.actionTimer[i] = 60; continue; }
-
-        S.state[i] = nextState;
-        const canSearch = (S.tickCount + i) % 30 === 0;
-        if (nextState === C.EntityState.Harvesting) {
-          if (canSearch && S.targetEntityId[i] === -1) {
-            const resourceMask = C.TRAIT_TREE | C.TRAIT_GOLD | C.TRAIT_BUSH | C.TRAIT_LOOT;
-            const resId = U.findNearest(S.positionX[i], S.positionY[i], 300, resourceMask);
-            if (resId !== -1) { S.targetEntityId[i] = resId; S.actionTimer[i] = 200; }
-            else { S.state[i] = C.EntityState.Idle; S.actionTimer[i] = 60; }
-          } else if (S.targetEntityId[i] === -1) { S.state[i] = C.EntityState.Idle; S.actionTimer[i] = 1; }
-        } else if (nextState === C.EntityState.Combat) {
-          if (canSearch && S.targetEntityId[i] === -1) {
-            const charMask = ~(C.TRAIT_TREE | C.TRAIT_GOLD | C.TRAIT_BUSH);
-            const targetId = U.findNearest(S.positionX[i], S.positionY[i], 250, charMask);
-            if (targetId !== -1 && targetId !== i) {
-               const myGid = S.groupAffiliations[i * 8];
-               const targetGid = S.groupAffiliations[targetId * 8];
-               if (myGid !== targetGid) { S.targetEntityId[i] = targetId; S.actionTimer[i] = 120; }
-               else { S.state[i] = C.EntityState.Idle; S.actionTimer[i] = 60; }
-            }
-            else { S.state[i] = C.EntityState.Idle; S.actionTimer[i] = 60; }
-          } else if (S.targetEntityId[i] === -1) { S.state[i] = C.EntityState.Idle; S.actionTimer[i] = 1; }
-        } else { S.actionTimer[i] = 120; }
-        S.activeCommandPriority[i] = 0;
-      } else { S.state[i] = C.EntityState.Idle; S.actionTimer[i] = 30; S.activeCommandPriority[i] = 0; }
+      }
     }
+    
+    // If survival task found, execute it immediately
+    if (survivalTask !== -1) {
+      S.state[i] = C.EntityState.Harvesting;
+      S.actionTimer[i] = 0;
+      continue;
+    }
+
+    // === PRIORITY 2: FINISH CURRENT TASK ===
+    if (S.actionTimer[i] > 0) {
+      S.actionTimer[i]--;
+      continue;
+    }
+    
+    // Complete harvesting - return to depot
+    if (S.state[i] === C.EntityState.Harvesting && S.targetEntityId[i] !== -1) {
+      const targetId = S.targetEntityId[i];
+      S.entityInventory[i] += 10;
+      // Store resource type for correct inventory slot
+      if ((S.traitBitmask[targetId] & C.TRAIT_BUSH) !== 0) S.charTool[i] = 2;
+      else if ((S.traitBitmask[targetId] & C.TRAIT_GOLD) !== 0) S.charTool[i] = 1;
+      else if ((S.traitBitmask[targetId] & C.TRAIT_TREE) !== 0) S.charTool[i] = 0;
+      else if ((S.traitBitmask[targetId] & C.TRAIT_LOOT) !== 0) S.charTool[i] = 3;
+      else S.charTool[i] = 0;
+      
+      S.state[i] = C.EntityState.ReturningToDepot;
+      S.targetEntityId[i] = -1;
+      S.targetBuildingId[i] = U.findNearestOwnedBuilding(S.positionX[i], S.positionY[i], 2000, C.BuildingType.Warehouse, gid);
+      continue;
+    }
+    
+    // Complete returning to depot
+    if (S.state[i] === C.EntityState.ReturningToDepot) {
+      if (S.targetBuildingId[i] === -1 || S.bldHealth[S.targetBuildingId[i]] <= 0) {
+        S.targetBuildingId[i] = U.findNearestOwnedBuilding(S.positionX[i], S.positionY[i], 2000, C.BuildingType.Warehouse, gid);
+        if (S.targetBuildingId[i] === -1) { S.state[i] = C.EntityState.Idle; S.actionTimer[i] = 60; continue; }
+      }
+      continue;
+    }
+    
+    // Complete construction
+    if (S.state[i] === C.EntityState.Construction) {
+      const bldId = S.targetBuildingId[i];
+      if (bldId !== -1 && S.bldHealth[bldId] < 1000) {
+        Atomics.add(S.bldHealth, bldId, 50);
+        if (S.bldHealth[bldId] >= 1000) {
+          S.bldHealth[bldId] = 1000;
+          S.state[i] = C.EntityState.Idle;
+          S.actionTimer[i] = 60;
+        } else {
+          S.actionTimer[i] = 120;
+        }
+      } else {
+        S.state[i] = C.EntityState.Idle;
+        S.actionTimer[i] = 30;
+      }
+      continue;
+    }
+
+    // === PRIORITY 3: GROUP COMMANDS ===
+    S.activePrioritySlot[i] = -1;
+    
+    // Check for pending events (attacks)
+    const nextEvent = S.pendingEvents[i * 4];
+    if (nextEvent !== -1) {
+      U.popNextEvent(i);
+      if (nextEvent === C.EVENT_HOSTILE_ATTACK) {
+        if ((S.traitBitmask[i] & C.TRAIT_AGGRESSIVE) !== 0) {
+          S.state[i] = C.EntityState.Combat;
+          S.actionTimer[i] = 120;
+        } else {
+          S.state[i] = C.EntityState.Fleeing;
+          S.actionTimer[i] = 180;
+        }
+        continue;
+      }
+    }
+    
+    // Check group target commands (from rules/leaders)
+    const baseIdx = i * 8;
+    for (let s = 0; s < 8; s++) {
+      const groupId = S.groupAffiliations[baseIdx + s];
+      if (groupId !== -1) {
+        const targetId = S.groupTargetEntityId[groupId];
+        if (targetId !== -1) {
+          S.targetEntityId[i] = targetId;
+          S.state[i] = C.EntityState.Combat;
+          S.actionTimer[i] = 300;
+          S.activePrioritySlot[i] = s;
+          continue;
+        }
+      }
+    }
+    if (S.state[i] === C.EntityState.Combat) continue;
+
+    // === PRIORITY 4: IDLE / WANDER ===
+    // Default state - do nothing, let groups drive progress
+    // Characters only act on survival needs or explicit group commands
+    S.state[i] = C.EntityState.Idle;
+    S.actionTimer[i] = 60 + (i % 60); // Stagger idle timers
+    S.targetEntityId[i] = -1;
+    S.targetBuildingId[i] = -1;
   }
 }
 
@@ -426,9 +428,11 @@ export function SteeringSystem(): void {
       if (distSq < 16.0) { 
         if (S.state[i] === C.EntityState.ReturningToDepot) {
           const gid = S.groupAffiliations[i * 8];
+          const invSlot = S.charTool[i]; // 0=wood, 1=gold, 2=food, 3=misc
           Atomics.add(S.groupTotalWealth, gid, S.entityInventory[i]);
-          Atomics.add(S.bldInventory, bldId * 4 + 0, S.entityInventory[i]);
+          Atomics.add(S.bldInventory, bldId * 4 + invSlot, S.entityInventory[i]);
           S.entityInventory[i] = 0;
+          S.charTool[i] = 0; // Reset tool slot
           if (S.money[i] > 500) {
             if (S.charWeapon[i] === 0) { S.charWeapon[i] = 1; Atomics.sub(S.money, i, 500); }
             else if (S.charArmor[i] === 0) { S.charArmor[i] = 1; Atomics.sub(S.money, i, 500); }
@@ -517,6 +521,47 @@ export function SteeringSystem(): void {
       const dist = Math.sqrt(distSq); if (dist > 0.1) { S.velocityX[i] = -(dx / dist) * 2.0; S.velocityY[i] = -(dy / dist) * 2.0; }
       if (distSq > 160000) S.targetEntityId[i] = -1;
     } else if (S.state[i] === C.EntityState.Combat || S.state[i] === C.EntityState.Harvesting) {
+      // Check if harvesting from a Field building (not entity)
+      const fieldBldId = S.targetBuildingId[i];
+      const isFieldHarvest = S.state[i] === C.EntityState.Harvesting && 
+                             fieldBldId !== -1 && 
+                             S.bldType[fieldBldId] === C.BuildingType.Field;
+      
+      if (isFieldHarvest) {
+        // Harvesting from Field building
+        const gid = S.groupAffiliations[i * 8];
+        const bx = S.bldPositionX[fieldBldId];
+        const by = S.bldPositionY[fieldBldId];
+        const bdx = bx - S.positionX[i];
+        const bdy = by - S.positionY[i];
+        const bDistSq = bdx * bdx + bdy * bdy;
+        
+        if (bDistSq > 400.0) {
+          const bDist = Math.sqrt(bDistSq);
+          S.velocityX[i] = (bdx / bDist) * 1.2;
+          S.velocityY[i] = (bdy / bDist) * 1.2;
+        } else if (bDistSq > 4.0) {
+          const bDist = Math.sqrt(bDistSq);
+          const damp = bDist / 20.0;
+          S.velocityX[i] = (bdx / bDist) * 1.2 * damp;
+          S.velocityY[i] = (bdy / bDist) * 1.2 * damp;
+        } else {
+          // At the field - harvest food
+          S.velocityX[i] *= 0.5;
+          S.velocityY[i] *= 0.5;
+          if (Math.random() > 0.8) {
+            S.entityInventory[i] += 10;
+            S.charTool[i] = 2; // Food slot
+            if (S.entityInventory[i] >= 100) {
+              S.state[i] = C.EntityState.ReturningToDepot;
+              S.targetBuildingId[i] = U.findNearestOwnedBuilding(S.positionX[i], S.positionY[i], 2000, C.BuildingType.Warehouse, gid);
+            }
+          }
+        }
+        continue;
+      }
+      
+      // Normal entity targeting (combat or bush harvesting)
       const speed = S.state[i] === C.EntityState.Combat ? 1.5 : 1.2;
       if (distSq > 400.0) { 
         const dist = Math.sqrt(distSq); S.velocityX[i] = (dx / dist) * speed; S.velocityY[i] = (dy / dist) * speed; 

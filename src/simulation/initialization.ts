@@ -88,6 +88,11 @@ export function initializeWorld(): void {
     S.bldType[g] = C.BuildingType.Warehouse;
     S.bldHealth[g] = 1000;
     S.bldOwnerGroup[g] = g;
+    // Add starting food (slot 2) and some wood/gold
+    S.bldInventory[g * 4 + 0] = 500;  // Wood
+    S.bldInventory[g * 4 + 1] = 500;  // Gold
+    S.bldInventory[g * 4 + 2] = 1000; // Food
+    S.bldInventory[g * 4 + 3] = 0;    // Misc
   }
 
   generateBiomes();

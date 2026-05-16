@@ -65,7 +65,7 @@ export const App: React.FC<AppProps> = ({
   tickCount, lastTickTime, avgTickTime, inspectEntity, chronicle,
   onFollow, onClearInspect
 }) => {
-  const [activeTab, setActiveTab] = useState<'monitor' | 'stats' | 'rules'>('monitor');
+  const [activeTab, setActiveTab] = useState<'monitor' | 'stats' | 'rules'>('stats');
   const [stats, setStats] = useState<GroupStats[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [brushActive, setBrushActive] = useState(false);
@@ -170,7 +170,7 @@ export const App: React.FC<AppProps> = ({
     <div className="h-full flex flex-col bg-white text-black font-mono">
       {/* Tabs */}
       <div className="flex border-b-2 border-black">
-        {(['monitor', 'stats', 'rules'] as const).map(tab => (
+        {(['stats', 'monitor', 'rules'] as const).map(tab => (
           <button 
             key={tab}
             onClick={() => setActiveTab(tab)}

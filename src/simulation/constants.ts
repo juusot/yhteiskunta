@@ -37,6 +37,21 @@ export enum TerrainType {
 
 export const EVENT_HOSTILE_ATTACK = 99;
 
+// Phase 21: Event Types (expanded)
+export const EVENT_MOVE = 100;
+export const EVENT_RECRUIT = 101;
+export const EVENT_TRADE = 102;
+export const EVENT_REPORT = 103;
+export const EVENT_BUILD = 104;
+export const EVENT_DISBAND = 105;
+export const EVENT_CUSTOM = 106;
+
+// Phase 21: Game Time
+export const TICKS_PER_DAY = 3600;  // 60 ticks/sec × 60 sec = 1 minute real-time = 1 game day
+export const DAYS_PER_MONTH = 30;
+export const MONTHS_PER_YEAR = 12;
+export const TICKS_PER_YEAR = TICKS_PER_DAY * DAYS_PER_MONTH * MONTHS_PER_YEAR;
+
 export enum EntityState {
   Idle = 0,
   Harvesting = 1,
@@ -55,6 +70,7 @@ export enum BuildingType {
   House = 2,
   Tower = 3,
   Wall = 4,
+  Field = 5,
 }
 
 export enum VehicleType {
@@ -75,3 +91,7 @@ export const GATE_NOT = 102;
 export const OP_END = 255;
 
 export const MAX_BYTECODE_PER_RULE = 32;
+
+// Phase 21: Group & Character Limits
+export const GROUP_SLOTS_PER_CHARACTER = 8;
+export const EVENT_SLOTS_PER_CHARACTER = 8;
