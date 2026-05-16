@@ -7,13 +7,30 @@ export function SummarySystem(): void {
   if (S.tickCount % 60 !== 0) return;
 
   S.groupPopulationCount.fill(0);
+  S.groupBuildingCount.fill(0);
+  S.groupTotalWealth.fill(0); // Reset for recount
   let totalActive = 0;
+
   for (let i = 0; i < C.MAX_ENTITIES; i++) {
     if (S.state[i] !== C.EntityState.Dead) {
-      const primaryGroupId = S.groupAffiliations[i * 8];
-      if (primaryGroupId >= 0 && primaryGroupId < C.MAX_GROUPS) {
-        S.groupPopulationCount[primaryGroupId]++;
+      const gid = S.groupAffiliations[i * 8];
+      if (gid >= 0 && gid < C.MAX_GROUPS) {
+        S.groupPopulationCount[gid]++;
+        S.groupTotalWealth[gid] += S.money[i];
         totalActive++;
+      }
+    }
+  }
+
+  // Add building inventories to wealth and update building counts
+  for (let b = 0; b < C.MAX_BUILDINGS; b++) {
+    if (S.bldHealth[b] > 0 && S.bldType[b] !== 0) {
+      const gid = S.bldOwnerGroup[b];
+      if (gid >= 0 && gid < C.MAX_GROUPS) {
+        S.groupBuildingCount[gid]++;
+        // Simple sum: Wood + Gold + Food + Misc (all weighted 1 for simplicity now)
+        const inv = S.bldInventory.slice(b * 4, b * 4 + 4);
+        S.groupTotalWealth[gid] += inv[0] + inv[1] + inv[2] + inv[3];
       }
     }
   }
@@ -22,8 +39,8 @@ export function SummarySystem(): void {
   for (let g = 0; g < C.MAX_GROUPS; g++) {
     const pop = S.groupPopulationCount[g];
     if (pop === 0) continue;
-    // Maintenance cost: groups lose wealth over time
-    const foodRequired = Math.max(1, Math.floor(pop * 0.1));
+    // Maintenance cost
+    const foodRequired = Math.max(1, Math.floor(pop * 0.2));
     S.groupTotalWealth[g] -= foodRequired;
     if (S.groupTotalWealth[g] <= 0) {
       S.groupTotalWealth[g] = 0;
@@ -102,11 +119,14 @@ export function SummarySystem(): void {
 
           let valid = false;
           if ((traits & C.TRAIT_GOLD) !== 0 && terrain === C.TerrainType.Water) valid = true;
-          else if ((traits & C.TRAIT_TREE) !== 0 && (terrain === C.TerrainType.Grass || terrain === C.TerrainType.Forest)) valid = true;
+          else if ((traits & C.TRAIT_TREE) !== 0 && terrain === C.TerrainType.Forest) valid = true;
           else if ((traits & C.TRAIT_BUSH) !== 0 && terrain === C.TerrainType.Grass) valid = true;
 
           if (valid) {
             S.positionX[i] = x; S.positionY[i] = y;
+            S.velocityX[i] = 0; S.velocityY[i] = 0;
+            S.targetEntityId[i] = -1;
+            S.targetBuildingId[i] = -1;
             S.health[i] = 100;
             S.state[i] = C.EntityState.Idle;
           }
@@ -281,7 +301,7 @@ export function TradeSystem(): void {
   for (let gA = 0; gA < 50; gA++) {
     if (S.groupTotalWealth[gA] > 15000) {
       for (let gB = 0; gB < 50; gB++) {
-        if (gA === gB) continue;
+        if (gA === gB || S.groupPopulationCount[gB] === 0) continue;
         if (S.groupTotalWealth[gB] < 1000) {
           const relation = S.groupRelationsMatrix[gA * C.MAX_GROUPS + gB];
           if (relation >= 0) {

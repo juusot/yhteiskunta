@@ -1,4 +1,5 @@
 // src/simulationWorker.ts
+console.log("Simulation Worker starting...");
 import * as C from './simulation/constants';
 import * as S from './simulation/state';
 import * as U from './simulation/utils';
@@ -68,12 +69,18 @@ self.onmessage = (e: MessageEvent) => {
           actionTimer: S.actionTimer.buffer,
           traitBitmask: S.traitBitmask.buffer,
           targetEntityId: S.targetEntityId.buffer,
+          targetBuildingId: S.targetBuildingId.buffer,
+          targetVehicleId: S.targetVehicleId.buffer,
+          isMounted: S.isMounted.buffer,
           pendingEvents: S.pendingEvents.buffer,
           carriedIntelEntityId: S.carriedIntelEntityId.buffer,
           carriedIntelX: S.carriedIntelX.buffer,
           carriedIntelY: S.carriedIntelY.buffer,
           mana: S.mana.buffer,
           entityInventory: S.entityInventory.buffer,
+          charWeapon: S.charWeapon.buffer,
+          charArmor: S.charArmor.buffer,
+          charTool: S.charTool.buffer,
           groupAffiliations: S.groupAffiliations.buffer,
           activeCommandPriority: S.activeCommandPriority.buffer,
           activePrioritySlot: S.activePrioritySlot.buffer,
@@ -90,11 +97,26 @@ self.onmessage = (e: MessageEvent) => {
           logicBytecode: S.logicBytecode.buffer,
           workerSync: S.workerSync.buffer,
           groupPopulationCount: S.groupPopulationCount.buffer,
+          groupBuildingCount: S.groupBuildingCount.buffer,
           groupTotalWealth: S.groupTotalWealth.buffer,
           worldMap: S.worldMap.buffer,
           globalFlowField: S.globalFlowField.buffer,
           influenceMap: S.influenceMap.buffer,
-          territoryOwnerMap: S.territoryOwnerMap.buffer
+          territoryOwnerMap: S.territoryOwnerMap.buffer,
+          bldPositionX: S.bldPositionX.buffer,
+          bldPositionY: S.bldPositionY.buffer,
+          bldType: S.bldType.buffer,
+          bldHealth: S.bldHealth.buffer,
+          bldOwnerGroup: S.bldOwnerGroup.buffer,
+          bldInventory: S.bldInventory.buffer,
+          vehPositionX: S.vehPositionX.buffer,
+          vehPositionY: S.vehPositionY.buffer,
+          vehVelocityX: S.vehVelocityX.buffer,
+          vehVelocityY: S.vehVelocityY.buffer,
+          vehType: S.vehType.buffer,
+          vehHealth: S.vehHealth.buffer,
+          vehPilotId: S.vehPilotId.buffer,
+          vehOwnerGroup: S.vehOwnerGroup.buffer
         }
       });
     } else {
@@ -103,8 +125,13 @@ self.onmessage = (e: MessageEvent) => {
   }
   
   if (type === "TICK") {
-    tick();
-    self.postMessage({ type: "TICK_COMPLETE" });
+    try {
+      tick();
+      self.postMessage({ type: "TICK_COMPLETE" });
+    } catch (e) {
+      console.error("Worker Tick Error:", e);
+      self.postMessage({ type: "TICK_ERROR", payload: e instanceof Error ? e.message : String(e) });
+    }
   }
   
   if (type === "PAUSE_SIM") S.setPaused(true);

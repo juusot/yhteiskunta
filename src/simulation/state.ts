@@ -12,6 +12,9 @@ export let state: Uint8Array;
 export let actionTimer: Int16Array;
 export let traitBitmask: Uint32Array;
 export let targetEntityId: Int32Array;
+export let targetBuildingId: Int32Array; // -1 if none
+export let targetVehicleId: Int32Array; // -1 if none
+export let isMounted: Uint8Array; // 1 if mounted, 0 otherwise
 export let pendingEvents: Int32Array;
 
 // Phase 17: Hybrid Intel
@@ -22,10 +25,17 @@ export let mana: Int16Array;
 
 // Phase 12: Logistics
 export let entityInventory: Int16Array;
+export let charWeapon: Int8Array;
+export let charArmor: Int8Array;
+export let charTool: Int8Array;
 
 // Spatial Partitioning Arrays (Local to each worker)
 export let spatialHead: Int32Array;
 export let spatialNext: Int32Array;
+export let bldSpatialHead: Int32Array;
+export let bldSpatialNext: Int32Array;
+export let vehSpatialHead: Int32Array;
+export let vehSpatialNext: Int32Array;
 
 // Entity Group Affiliations
 export let groupAffiliations: Int32Array;
@@ -62,6 +72,7 @@ export let logicBytecode: Int32Array;
 
 // Analytics Arrays
 export let groupPopulationCount: Int32Array;
+export let groupBuildingCount: Int32Array;
 export let groupTotalWealth: Int32Array;
 
 // Phase 11: Environmental Dynamics
@@ -73,6 +84,23 @@ export let integrationField: Float32Array;
 export let influenceMap: Int16Array;
 export let territoryOwnerMap: Int32Array;
 export let settlementTimerMap: Int16Array;
+
+// Phase 22: Buildings & Vehicles Subsystems
+export let bldPositionX: Float32Array;
+export let bldPositionY: Float32Array;
+export let bldType: Uint8Array;
+export let bldHealth: Int32Array;
+export let bldOwnerGroup: Int32Array;
+export let bldInventory: Int32Array; // [buildingIdx * 4] -> Wood, Gold, Food, Misc
+
+export let vehPositionX: Float32Array;
+export let vehPositionY: Float32Array;
+export let vehVelocityX: Float32Array;
+export let vehVelocityY: Float32Array;
+export let vehType: Uint8Array;
+export let vehHealth: Int32Array;
+export let vehPilotId: Int32Array; // Character currently driving
+export let vehOwnerGroup: Int32Array;
 
 export let quadrantIndex: number = -1;
 export let minX = 0, maxX = 1600, minY = 0, maxY = 1200;
@@ -103,12 +131,21 @@ export function initializeState(): void {
   actionTimer = new Int16Array(new SharedArrayBuffer(C.MAX_ENTITIES * 2));
   traitBitmask = new Uint32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
   targetEntityId = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
+  targetBuildingId = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
+  targetBuildingId.fill(-1);
+  targetVehicleId = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
+  targetVehicleId.fill(-1);
+  isMounted = new Uint8Array(new SharedArrayBuffer(C.MAX_ENTITIES));
+  isMounted.fill(0);
   pendingEvents = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4 * 4));
   carriedIntelEntityId = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
   carriedIntelX = new Float32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
   carriedIntelY = new Float32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
   mana = new Int16Array(new SharedArrayBuffer(C.MAX_ENTITIES * 2));
   entityInventory = new Int16Array(new SharedArrayBuffer(C.MAX_ENTITIES * 2));
+  charWeapon = new Int8Array(new SharedArrayBuffer(C.MAX_ENTITIES));
+  charArmor = new Int8Array(new SharedArrayBuffer(C.MAX_ENTITIES));
+  charTool = new Int8Array(new SharedArrayBuffer(C.MAX_ENTITIES));
   groupAffiliations = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 8 * 4));
   activeCommandPriority = new Uint8Array(new SharedArrayBuffer(C.MAX_ENTITIES * 1));
   activePrioritySlot = new Int8Array(new SharedArrayBuffer(C.MAX_ENTITIES * 1));
@@ -125,11 +162,30 @@ export function initializeState(): void {
   workerSync = new Int32Array(new SharedArrayBuffer(4 * 4));
   logicBytecode = new Int32Array(new SharedArrayBuffer(C.MAX_RULES * C.MAX_BYTECODE_PER_RULE * 4));
   groupPopulationCount = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
+  groupBuildingCount = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   groupTotalWealth = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   worldMap = new Uint8Array(new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS));
   globalFlowField = new Float32Array(new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS * 2 * 4));
   influenceMap = new Int16Array(new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS * 2));
   territoryOwnerMap = new Int32Array(new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS * 4));
+
+  // Buildings
+  bldPositionX = new Float32Array(new SharedArrayBuffer(C.MAX_BUILDINGS * 4));
+  bldPositionY = new Float32Array(new SharedArrayBuffer(C.MAX_BUILDINGS * 4));
+  bldType = new Uint8Array(new SharedArrayBuffer(C.MAX_BUILDINGS));
+  bldHealth = new Int32Array(new SharedArrayBuffer(C.MAX_BUILDINGS * 4));
+  bldOwnerGroup = new Int32Array(new SharedArrayBuffer(C.MAX_BUILDINGS * 4));
+  bldInventory = new Int32Array(new SharedArrayBuffer(C.MAX_BUILDINGS * 4 * 4));
+
+  // Vehicles
+  vehPositionX = new Float32Array(new SharedArrayBuffer(C.MAX_VEHICLES * 4));
+  vehPositionY = new Float32Array(new SharedArrayBuffer(C.MAX_VEHICLES * 4));
+  vehVelocityX = new Float32Array(new SharedArrayBuffer(C.MAX_VEHICLES * 4));
+  vehVelocityY = new Float32Array(new SharedArrayBuffer(C.MAX_VEHICLES * 4));
+  vehType = new Uint8Array(new SharedArrayBuffer(C.MAX_VEHICLES));
+  vehHealth = new Int32Array(new SharedArrayBuffer(C.MAX_VEHICLES * 4));
+  vehPilotId = new Int32Array(new SharedArrayBuffer(C.MAX_VEHICLES * 4));
+  vehOwnerGroup = new Int32Array(new SharedArrayBuffer(C.MAX_VEHICLES * 4));
 
   initializeLocalState();
 }
@@ -145,6 +201,9 @@ export function mapStateBuffers(buffers: any): void {
   actionTimer = new Int16Array(buffers.actionTimer);
   traitBitmask = new Uint32Array(buffers.traitBitmask);
   targetEntityId = new Int32Array(buffers.targetEntityId);
+  targetBuildingId = new Int32Array(buffers.targetBuildingId);
+  targetVehicleId = new Int32Array(buffers.targetVehicleId);
+  isMounted = new Uint8Array(buffers.isMounted);
   pendingEvents = new Int32Array(buffers.pendingEvents);
   groupAffiliations = new Int32Array(buffers.groupAffiliations);
   activeCommandPriority = new Uint8Array(buffers.activeCommandPriority);
@@ -155,10 +214,14 @@ export function mapStateBuffers(buffers: any): void {
   groupTargetAge = new Int32Array(buffers.groupTargetAge);
   ruleRegistry = new Int32Array(buffers.ruleRegistry);
   groupPopulationCount = new Int32Array(buffers.groupPopulationCount);
+  groupBuildingCount = new Int32Array(buffers.groupBuildingCount);
   groupTotalWealth = new Int32Array(buffers.groupTotalWealth);
   worldMap = new Uint8Array(buffers.worldMap);
   globalFlowField = new Float32Array(buffers.globalFlowField);
   entityInventory = new Int16Array(buffers.entityInventory);
+  charWeapon = new Int8Array(buffers.charWeapon);
+  charArmor = new Int8Array(buffers.charArmor);
+  charTool = new Int8Array(buffers.charTool);
   groupWarehouseX = new Float32Array(buffers.groupWarehouseX);
   groupWarehouseY = new Float32Array(buffers.groupWarehouseY);
   groupRelationsMatrix = new Int8Array(buffers.groupRelationsMatrix);
@@ -173,6 +236,24 @@ export function mapStateBuffers(buffers: any): void {
   logicBytecode = new Int32Array(buffers.logicBytecode);
   workerSync = new Int32Array(buffers.workerSync);
 
+  // Buildings
+  bldPositionX = new Float32Array(buffers.bldPositionX);
+  bldPositionY = new Float32Array(buffers.bldPositionY);
+  bldType = new Uint8Array(buffers.bldType);
+  bldHealth = new Int32Array(buffers.bldHealth);
+  bldOwnerGroup = new Int32Array(buffers.bldOwnerGroup);
+  bldInventory = new Int32Array(buffers.bldInventory);
+
+  // Vehicles
+  vehPositionX = new Float32Array(buffers.vehPositionX);
+  vehPositionY = new Float32Array(buffers.vehPositionY);
+  vehVelocityX = new Float32Array(buffers.vehVelocityX);
+  vehVelocityY = new Float32Array(buffers.vehVelocityY);
+  vehType = new Uint8Array(buffers.vehType);
+  vehHealth = new Int32Array(buffers.vehHealth);
+  vehPilotId = new Int32Array(buffers.vehPilotId);
+  vehOwnerGroup = new Int32Array(buffers.vehOwnerGroup);
+
   initializeLocalState();
 }
 
@@ -181,6 +262,17 @@ function initializeLocalState(): void {
   spatialHead.fill(-1);
   spatialNext = new Int32Array(C.MAX_ENTITIES);
   spatialNext.fill(-1);
+
+  bldSpatialHead = new Int32Array(C.NUM_CELLS);
+  bldSpatialHead.fill(-1);
+  bldSpatialNext = new Int32Array(C.MAX_BUILDINGS);
+  bldSpatialNext.fill(-1);
+
+  vehSpatialHead = new Int32Array(C.NUM_CELLS);
+  vehSpatialHead.fill(-1);
+  vehSpatialNext = new Int32Array(C.MAX_VEHICLES);
+  vehSpatialNext.fill(-1);
+
   integrationField = new Float32Array(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS);
   settlementTimerMap = new Int16Array(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS);
 }

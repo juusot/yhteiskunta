@@ -3,6 +3,8 @@
 export const MAX_ENTITIES = 100_000;
 export const MAX_GROUPS = 1000;
 export const MAX_RULES = 100;
+export const MAX_BUILDINGS = 20_000;
+export const MAX_VEHICLES = 5_000;
 
 export const WORLD_WIDTH = 1600;
 export const WORLD_HEIGHT = 1200;
@@ -24,6 +26,7 @@ export const TRAIT_SCOUT = 1 << 4;
 export const TRAIT_FANATIC = 1 << 5;
 export const TRAIT_COURIER = 1 << 6;
 export const TRAIT_MAGIC = 1 << 7;
+export const TRAIT_LOOT = 1 << 8;
 
 export enum TerrainType {
   Grass = 0,
@@ -43,6 +46,22 @@ export enum EntityState {
   Dead = 5,
   Trading = 6,
   ReportingIntel = 7,
+  Construction = 8,
+}
+
+export enum BuildingType {
+  None = 0,
+  Warehouse = 1,
+  House = 2,
+  Tower = 3,
+  Wall = 4,
+}
+
+export enum VehicleType {
+  None = 0,
+  Cart = 1,
+  Boat = 2,
+  Helicopter = 3,
 }
 
 // Phase 19: OpCodes & Gates

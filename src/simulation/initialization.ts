@@ -43,6 +43,16 @@ export function initializeWorld(): void {
   S.territoryOwnerMap.fill(-1);
   for (let r = 0; r < C.MAX_RULES * 8; r++) S.ruleRegistry[r] = 0;
 
+  // Reset Buildings
+  for (let i = 0; i < C.MAX_BUILDINGS; i++) {
+    S.bldType[i] = 0; S.bldHealth[i] = 0; S.bldOwnerGroup[i] = -1;
+    for (let j = 0; j < 4; j++) S.bldInventory[i * 4 + j] = 0;
+  }
+  // Reset Vehicles
+  for (let i = 0; i < C.MAX_VEHICLES; i++) {
+    S.vehType[i] = 0; S.vehHealth[i] = 0; S.vehPilotId[i] = -1; S.vehOwnerGroup[i] = -1;
+  }
+
   for (let g = 0; g < C.MAX_GROUPS; g++) {
     S.groupTargetEntityId[g] = -1;
     S.groupTargetX[g] = 0;
@@ -71,6 +81,15 @@ export function initializeWorld(): void {
   // 3: Pink Square (Bottom-Right)
   S.groupWarehouseX[3] = 1450; S.groupWarehouseY[3] = 1050; S.groupVisualArchetypes[3] = 2;
 
+  // Spawn initial warehouses as buildings
+  for (let g = 0; g < 4; g++) {
+    S.bldPositionX[g] = S.groupWarehouseX[g];
+    S.bldPositionY[g] = S.groupWarehouseY[g];
+    S.bldType[g] = C.BuildingType.Warehouse;
+    S.bldHealth[g] = 1000;
+    S.bldOwnerGroup[g] = g;
+  }
+
   generateBiomes();
 
   // Reset all entities to Dead
@@ -84,8 +103,9 @@ export function initializeWorld(): void {
     for (let s = 0; s < 8; s++) S.groupAffiliations[baseAffIdx + s] = -1;
     const baseEventIdx = i * 4;
     for (let s = 0; s < 4; s++) S.pendingEvents[baseEventIdx + s] = -1;
-    S.targetEntityId[i] = -1; S.activeCommandPriority[i] = 0; S.activePrioritySlot[i] = -1;
+    S.targetEntityId[i] = -1; S.targetBuildingId[i] = -1; S.targetVehicleId[i] = -1; S.isMounted[i] = 0; S.activeCommandPriority[i] = 0; S.activePrioritySlot[i] = -1;
     S.entityInventory[i] = 0; S.mana[i] = 100; S.carriedIntelEntityId[i] = -1;
+    S.charWeapon[i] = 0; S.charArmor[i] = 0; S.charTool[i] = 0;
   }
 
   // Spawn 20 members for each nation
@@ -129,8 +149,8 @@ export function initializeWorld(): void {
     } else if (terrain === C.TerrainType.Forest) {
       S.traitBitmask[id] = C.TRAIT_TREE;
     } else {
-      // Grass: either Tree or Bush
-      S.traitBitmask[id] = Math.random() > 0.4 ? C.TRAIT_TREE : C.TRAIT_BUSH;
+      // Grass: Only Bushes
+      S.traitBitmask[id] = C.TRAIT_BUSH;
     }
   }
 }

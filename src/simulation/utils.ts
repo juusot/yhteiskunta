@@ -32,6 +32,88 @@ export function findNearest(x: number, y: number, radius: number, filterBitmask:
   return closestId;
 }
 
+export function findNearestBuilding(x: number, y: number, radius: number, typeFilter: number): number {
+  const radiusSq = radius * radius;
+  let minDistanceSq = radiusSq + 1;
+  let closestId = -1;
+  const minCellX = Math.max(0, Math.floor((x - radius) / C.GRID_SIZE));
+  const maxCellX = Math.min(C.GRID_COLS - 1, Math.floor((x + radius) / C.GRID_SIZE));
+  const minCellY = Math.max(0, Math.floor((y - radius) / C.GRID_SIZE));
+  const maxCellY = Math.min(C.GRID_ROWS - 1, Math.floor((y + radius) / C.GRID_SIZE));
+  let itemsChecked = 0;
+  for (let cy = minCellY; cy <= maxCellY; cy++) {
+    for (let cx = minCellX; cx <= maxCellX; cx++) {
+      const cellIndex = cy * C.GRID_COLS + cx;
+      let bldId = S.bldSpatialHead[cellIndex];
+      while (bldId !== -1) {
+        itemsChecked++;
+        if (itemsChecked >= 64) break;
+        if (typeFilter === -1 || S.bldType[bldId] === typeFilter) {
+          const dx = S.bldPositionX[bldId] - x; const dy = S.bldPositionY[bldId] - y;
+          const distSq = dx * dx + dy * dy;
+          if (distSq < minDistanceSq && distSq <= radiusSq) { minDistanceSq = distSq; closestId = bldId; }
+        }
+        bldId = S.bldSpatialNext[bldId];
+      }
+      if (itemsChecked >= 64) break;
+    }
+    if (itemsChecked >= 64) break;
+  }
+  return closestId;
+}
+
+export function findNearestOwnedBuilding(x: number, y: number, radius: number, typeFilter: number, ownerGroup: number): number {
+  const radiusSq = radius * radius;
+  let minDistanceSq = radiusSq + 1;
+  let closestId = -1;
+  const minCellX = Math.max(0, Math.floor((x - radius) / C.GRID_SIZE));
+  const maxCellX = Math.min(C.GRID_COLS - 1, Math.floor((x + radius) / C.GRID_SIZE));
+  const minCellY = Math.max(0, Math.floor((y - radius) / C.GRID_SIZE));
+  const maxCellY = Math.min(C.GRID_ROWS - 1, Math.floor((y + radius) / C.GRID_SIZE));
+  
+  for (let cy = minCellY; cy <= maxCellY; cy++) {
+    for (let cx = minCellX; cx <= maxCellX; cx++) {
+      const cellIndex = cy * C.GRID_COLS + cx;
+      let bldId = S.bldSpatialHead[cellIndex];
+      while (bldId !== -1) {
+        if (S.bldOwnerGroup[bldId] === ownerGroup && (typeFilter === -1 || S.bldType[bldId] === typeFilter)) {
+          const dx = S.bldPositionX[bldId] - x; const dy = S.bldPositionY[bldId] - y;
+          const distSq = dx * dx + dy * dy;
+          if (distSq < minDistanceSq && distSq <= radiusSq) { minDistanceSq = distSq; closestId = bldId; }
+        }
+        bldId = S.bldSpatialNext[bldId];
+      }
+    }
+  }
+  return closestId;
+}
+
+export function findNearestVehicle(x: number, y: number, radius: number, typeFilter: number): number {
+  const radiusSq = radius * radius;
+  let minDistanceSq = radiusSq + 1;
+  let closestId = -1;
+  const minCellX = Math.max(0, Math.floor((x - radius) / C.GRID_SIZE));
+  const maxCellX = Math.min(C.GRID_COLS - 1, Math.floor((x + radius) / C.GRID_SIZE));
+  const minCellY = Math.max(0, Math.floor((y - radius) / C.GRID_SIZE));
+  const maxCellY = Math.min(C.GRID_ROWS - 1, Math.floor((y + radius) / C.GRID_SIZE));
+  
+  for (let cy = minCellY; cy <= maxCellY; cy++) {
+    for (let cx = minCellX; cx <= maxCellX; cx++) {
+      const cellIndex = cy * C.GRID_COLS + cx;
+      let vehId = S.vehSpatialHead[cellIndex];
+      while (vehId !== -1) {
+        if (S.vehHealth[vehId] > 0 && (typeFilter === -1 || S.vehType[vehId] === typeFilter)) {
+          const dx = S.vehPositionX[vehId] - x; const dy = S.vehPositionY[vehId] - y;
+          const distSq = dx * dx + dy * dy;
+          if (distSq < minDistanceSq && distSq <= radiusSq) { minDistanceSq = distSq; closestId = vehId; }
+        }
+        vehId = S.vehSpatialNext[vehId];
+      }
+    }
+  }
+  return closestId;
+}
+
 export function pushEvent(entityId: number, eventId: number): boolean {
   const baseIndex = entityId * 4;
   for (let slot = 0; slot < 4; slot++) {
