@@ -46,7 +46,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const canvas = document.getElementById('simCanvas') as HTMLCanvasElement;
     if (!canvas) { console.error("Canvas #simCanvas not found!"); return; }
     
-    const gl = canvas.getContext('webgl2', { alpha: false, antialias: true });
+    const gl = canvas.getContext('webgl2', { alpha: false, antialias: true }) as any;
     if (!gl) {
         console.error("WebGL 2 not supported!");
         alert("WebGL 2 not supported. On Linux, try --ignore-gpu-blocklist in your browser, or check your GPU drivers.");
@@ -69,9 +69,21 @@ window.addEventListener('DOMContentLoaded', () => {
     const saveBtn = document.getElementById('saveBtn') as HTMLButtonElement;
     const loadBtn = document.getElementById('loadBtn') as HTMLButtonElement;
     const btnToggleLoop = document.getElementById('btn-toggle-loop') as HTMLButtonElement;
-    const btnSingleStep = document.getElementById('btn-single-step') as HTMLButtonElement;
+    btnToggleLoop.textContent = "⏸";
     const btnTerritoryToggle = document.getElementById('btn-territory-toggle') as HTMLButtonElement;
     const gameTimeDisplay = document.getElementById('gameTimeDisplay') as HTMLDivElement;
+    const btnUiToggle = document.getElementById('btn-ui-toggle') as HTMLButtonElement;
+    const btnUiClose = document.getElementById('btn-ui-close') as HTMLButtonElement;
+    const uiPopup = document.getElementById('ui-popup') as HTMLDivElement;
+
+    // UI Popup toggle
+    btnUiToggle.onclick = () => { uiPopup.classList.add('visible'); };
+    btnUiClose.onclick = () => { uiPopup.classList.remove('visible'); };
+    
+    // Close on Escape key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') uiPopup.classList.remove('visible');
+    });
 
     // --- Shaders ---
     const TILE_VS = `#version 300 es
@@ -104,10 +116,15 @@ window.addEventListener('DOMContentLoaded', () => {
     layout(location = 0) in vec2 a_pos;
     layout(location = 1) in float a_owner;
     layout(location = 2) in float a_strength;
+    layout(location = 3) in float a_border;
     uniform vec2 u_resolution;
     uniform vec4 u_camera;
+    uniform float u_zoom;
     out float v_owner;
     out float v_strength;
+    out float v_border;
+    out float v_zoom;
+    out vec2 v_localPos;
     void main() {
         vec2 worldPos = vec2(float(gl_InstanceID % 160), float(gl_InstanceID / 160)) * 10.0;
         vec2 screenPos = (worldPos - u_camera.xy) * u_camera.z;
@@ -116,21 +133,47 @@ window.addEventListener('DOMContentLoaded', () => {
         gl_Position = vec4(clipPos + (a_pos * 10.0 * u_camera.z / u_resolution), 0.0, 1.0);
         v_owner = a_owner;
         v_strength = a_strength;
+        v_border = a_border;
+        v_zoom = u_zoom;
+        v_localPos = a_pos + vec2(0.5);
     }`;
 
     const INF_FS = `#version 300 es
     precision highp float;
     in float v_owner;
     in float v_strength;
+    in float v_border;
+    in float v_zoom;
+    in vec2 v_localPos;
     out vec4 outColor;
     void main() {
-        if (v_owner == -1.0 || v_strength < 0.01) discard;
-        vec3 color = vec3(1.0, 1.0, 1.0);
-        if (v_owner == 0.0) color = vec3(1.0, 1.0, 0.0);
-        else if (v_owner == 1.0) color = vec3(1.0, 0.0, 0.0);
-        else if (v_owner == 2.0) color = vec3(0.0, 0.0, 1.0);
-        else if (v_owner == 3.0) color = vec3(1.0, 0.0, 1.0);
-        outColor = vec4(color, v_strength * 0.08);
+        if (v_owner == -1.0 || v_strength < 0.05) discard;
+        
+        // Distinct colors for each nation
+        vec3 color;
+        if (v_owner == 0.0) color = vec3(0.9, 0.2, 0.2);      // Red
+        else if (v_owner == 1.0) color = vec3(0.2, 0.4, 0.9); // Blue  
+        else if (v_owner == 2.0) color = vec3(0.2, 0.7, 0.2); // Green
+        else if (v_owner == 3.0) color = vec3(0.9, 0.7, 0.1); // Yellow
+        else color = vec3(0.5, 0.5, 0.5);
+        
+        // Fade fill when zoomed in
+        float alpha = 0.35;
+        if (v_zoom > 2.0) {
+            alpha *= (2.0 / v_zoom);
+            if (alpha < 0.05) discard;
+        }
+        
+        // Hide border at high zoom (close-up view)
+        bool showBorder = v_zoom < 4.0;
+        
+        // Draw darker border where different nations meet
+        if (showBorder && v_border > 0.5) {
+            color *= 0.4;
+            alpha = 0.9;
+        }
+        
+        outColor = vec4(color, alpha);
     }`;
 
     const ENTITY_VS = `#version 300 es
@@ -265,6 +308,15 @@ window.addEventListener('DOMContentLoaded', () => {
                 bool isBanner = abs(abs(v_pos.x) - 0.6) < 0.15 && v_pos.y > -0.1 && v_pos.y < 0.4;
                 if (isBanner) color = groupColor * 0.8;
             }
+        } else if (v_type == 5.0) { // Field
+            color = vec3(0.8, 0.7, 0.2); // Wheat color
+            bool isRow = fract((v_pos.x + v_pos.y) * 4.0) > 0.5;
+            if (isRow) color *= 0.8;
+        } else if (v_type == 3.0 || v_type == 4.0) { // Tower or Wall
+            color = vec3(0.5, 0.5, 0.5);
+            if (v_type == 3.0 && abs(v_pos.x) > 0.6) discard; // Tower is tall and thin
+            if (v_pos.y > 0.6 && fract((v_pos.x + 1.0) * 4.0) > 0.5) discard; // Crenellations
+            if (v_type == 3.0 && v_pos.y > 0.4 && v_pos.y < 0.6) color = groupColor; // Tower band
         } else {
             color = vec3(0.3);
         }
@@ -336,11 +388,11 @@ window.addEventListener('DOMContentLoaded', () => {
     const instPosXVbo = gl.createBuffer(), instPosYVbo = gl.createBuffer(), instTypeVbo = gl.createBuffer(), instGroupVbo = gl.createBuffer(), instHealthVbo = gl.createBuffer();
     const bldPosXVbo = gl.createBuffer(), bldPosYVbo = gl.createBuffer(), bldTypeVbo = gl.createBuffer(), bldGroupVbo = gl.createBuffer(), bldHealthVbo = gl.createBuffer();
     const vehPosXVbo = gl.createBuffer(), vehPosYVbo = gl.createBuffer(), vehTypeVbo = gl.createBuffer(), vehGroupVbo = gl.createBuffer();
-    const tileTypeVbo = gl.createBuffer(), infOwnerVbo = gl.createBuffer(), infStrengthVbo = gl.createBuffer();
+    const tileTypeVbo = gl.createBuffer(), infOwnerVbo = gl.createBuffer(), infStrengthVbo = gl.createBuffer(), infBorderVbo = gl.createBuffer();
 
-    const tileTypeBuffer = new Float32Array(MAP_COLS * MAP_ROWS), infOwnerBuffer = new Float32Array(MAP_COLS * MAP_ROWS), infStrengthBuffer = new Float32Array(MAP_COLS * MAP_ROWS);
+    const tileTypeBuffer = new Float32Array(MAP_COLS * MAP_ROWS), infOwnerBuffer = new Float32Array(MAP_COLS * MAP_ROWS), infStrengthBuffer = new Float32Array(MAP_COLS * MAP_ROWS), infBorderBuffer = new Float32Array(MAP_COLS * MAP_ROWS);
 
-    let isLooping = false, targetTPS = 60, showPoliticalMap = true;
+    let isLooping = true, targetTPS = 60, showPoliticalMap = true;
     let cameraX = 0, cameraY = 0, zoom = 1.0;
     let inspectEntityId = -1, followEntityId = -1, tickCount = 0;
     let lastTickDuration = 0, avgTickDuration = 0, tickTimes: number[] = [], chronicle: string[] = [];
@@ -371,6 +423,7 @@ window.addEventListener('DOMContentLoaded', () => {
     speedBtns[4].onclick = () => setSpeed(0, 4);
 
     window.addEventListener('wheel', (e) => {
+        if (uiPopup.classList.contains('visible')) return;
         const rect = canvas.getBoundingClientRect();
         const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
         const mx = (e.clientX - rect.left) * scaleX, my = (e.clientY - rect.top) * scaleY;
@@ -381,13 +434,17 @@ window.addEventListener('DOMContentLoaded', () => {
     }, { passive: true });
 
     let isDragging = false, lastX = 0, lastY = 0;
-    canvas.addEventListener('mousedown', (e) => { isDragging = true; lastX = e.clientX; lastY = e.clientY; });
+    canvas.addEventListener('mousedown', (e) => { 
+        if (uiPopup.classList.contains('visible')) return;
+        isDragging = true; lastX = e.clientX; lastY = e.clientY; 
+    });
     window.addEventListener('mouseup', () => isDragging = false);
     window.addEventListener('mousemove', (e) => {
-        if (isDragging) { cameraX -= (e.clientX - lastX) / zoom; cameraY -= (e.clientY - lastY) / zoom; lastX = e.clientX; lastY = e.clientY; }
+        if (isDragging && !uiPopup.classList.contains('visible')) { cameraX -= (e.clientX - lastX) / zoom; cameraY -= (e.clientY - lastY) / zoom; lastX = e.clientX; lastY = e.clientY; }
     });
 
     canvas.addEventListener('click', (e) => {
+      if (uiPopup.classList.contains('visible')) return;
       const rect = canvas.getBoundingClientRect();
       const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
       const worldX = cameraX + ((e.clientX - rect.left) * scaleX) / zoom;
@@ -399,9 +456,8 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    btnToggleLoop.onclick = () => { isLooping = !isLooping; btnToggleLoop.textContent = isLooping ? "Pause" : "Resume"; if (isLooping) startTick(); };
+    btnToggleLoop.onclick = () => { isLooping = !isLooping; btnToggleLoop.textContent = isLooping ? "⏸" : "▶"; if (isLooping) startTick(); };
     btnTerritoryToggle.onclick = () => { showPoliticalMap = !showPoliticalMap; };
-    btnSingleStep.onclick = () => { if (!isTickInProgress) startTick(); };
 
     const startTick = () => {
         if (!workerSync || isTickInProgress) return;
@@ -430,7 +486,10 @@ window.addEventListener('DOMContentLoaded', () => {
         
         const uCam = [cameraX, cameraY, zoom, 0], uRes = [canvas.width, canvas.height];
 
-        // Tiles
+        // ============================================================
+        // RENDER LAYER 1: Background Terrain Tiles (worldMap)
+        // Draw base terrain: grass, forest, water, mountains
+        // ============================================================
         gl.useProgram(tileProg);
         gl.uniform2fv(gl.getUniformLocation(tileProg, 'u_resolution'), uRes); gl.uniform4fv(gl.getUniformLocation(tileProg, 'u_camera'), uCam);
         for(let i=0; i<MAP_COLS*MAP_ROWS; i++) tileTypeBuffer[i] = worldMap[i];
@@ -438,34 +497,54 @@ window.addEventListener('DOMContentLoaded', () => {
         gl.bindVertexArray(tileVao); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(1, 1);
         gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, MAP_COLS * MAP_ROWS);
 
+        // ============================================================
+        // RENDER LAYER 2: Influence Map Overlay (semi-transparent)
+        // Political territory boundaries with alpha blending
+        // ============================================================
         if (showPoliticalMap) {
+          gl.enable(gl.BLEND);
+          gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
           gl.useProgram(infProg);
           gl.uniform2fv(gl.getUniformLocation(infProg, 'u_resolution'), uRes); gl.uniform4fv(gl.getUniformLocation(infProg, 'u_camera'), uCam);
-          for(let i=0; i<MAP_COLS*MAP_ROWS; i++) { infOwnerBuffer[i] = territoryOwnerMap[i]; infStrengthBuffer[i] = influenceMap[i] / 1000.0; }
+          gl.uniform1f(gl.getUniformLocation(infProg, 'u_zoom'), zoom);
+          
+          // Compute borders: detect where ownership changes between neighbors
+          const showBorders = false; // Temporarily disabled for testing
+          for(let y=0; y<MAP_ROWS; y++) {
+            for(let x=0; x<MAP_COLS; x++) {
+              const i = y * MAP_COLS + x;
+              const owner = territoryOwnerMap[i];
+              let isBorder = 0;
+              if (showBorders && owner !== -1) {
+                // Check 4 neighbors
+                if (x > 0 && territoryOwnerMap[i-1] !== owner) isBorder = 1;
+                else if (x < MAP_COLS-1 && territoryOwnerMap[i+1] !== owner) isBorder = 1;
+                else if (y > 0 && territoryOwnerMap[i-MAP_COLS] !== owner) isBorder = 1;
+                else if (y < MAP_ROWS-1 && territoryOwnerMap[i+MAP_COLS] !== owner) isBorder = 1;
+              }
+              infBorderBuffer[i] = isBorder;
+              infOwnerBuffer[i] = owner;
+              infStrengthBuffer[i] = influenceMap[i] / 1000.0;
+            }
+          }
+          
           gl.bindBuffer(gl.ARRAY_BUFFER, infOwnerVbo); gl.bufferData(gl.ARRAY_BUFFER, infOwnerBuffer, gl.DYNAMIC_DRAW);
           gl.bindVertexArray(infVao); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(1, 1);
           gl.bindBuffer(gl.ARRAY_BUFFER, infStrengthVbo); gl.bufferData(gl.ARRAY_BUFFER, infStrengthBuffer, gl.DYNAMIC_DRAW);
           gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(2, 1);
+          
+          // Add border buffer
+          gl.bindBuffer(gl.ARRAY_BUFFER, infBorderVbo); gl.bufferData(gl.ARRAY_BUFFER, infBorderBuffer, gl.DYNAMIC_DRAW);
+          gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(3, 1);
+          
           gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, MAP_COLS * MAP_ROWS);
+          gl.disable(gl.BLEND);
         }
 
-        // Entities
-        gl.useProgram(entProg);
-        gl.uniform2fv(gl.getUniformLocation(entProg, 'u_resolution'), uRes); gl.uniform4fv(gl.getUniformLocation(entProg, 'u_camera'), uCam);
-        gl.bindVertexArray(entVao);
-        gl.bindBuffer(gl.ARRAY_BUFFER, instPosXVbo); gl.bufferData(gl.ARRAY_BUFFER, positionX, gl.DYNAMIC_DRAW);
-        gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(1, 1);
-        gl.bindBuffer(gl.ARRAY_BUFFER, instPosYVbo); gl.bufferData(gl.ARRAY_BUFFER, positionY, gl.DYNAMIC_DRAW);
-        gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(2, 1);
-        gl.bindBuffer(gl.ARRAY_BUFFER, instTypeVbo); gl.bufferData(gl.ARRAY_BUFFER, traitBitmask, gl.DYNAMIC_DRAW);
-        gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 1, gl.UNSIGNED_INT, false, 0, 0); gl.vertexAttribDivisor(3, 1);
-        gl.bindBuffer(gl.ARRAY_BUFFER, instGroupVbo); gl.bufferData(gl.ARRAY_BUFFER, groupAffiliations, gl.DYNAMIC_DRAW);
-        gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 1, gl.INT, false, 8 * 4, 0); gl.vertexAttribDivisor(4, 1);
-        gl.bindBuffer(gl.ARRAY_BUFFER, instHealthVbo); gl.bufferData(gl.ARRAY_BUFFER, health, gl.DYNAMIC_DRAW);
-        gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 1, gl.INT, false, 0, 0); gl.vertexAttribDivisor(5, 1);
-        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, MAX_ENTITIES);
-
-        // Buildings
+        // ============================================================
+        // RENDER LAYER 3: Static Structures (buildings, fields)
+        // Warehouses, houses, towers, walls, fields - drawn before entities
+        // ============================================================
         if (bldPositionX) {
           gl.useProgram(bldProg);
           gl.uniform2fv(gl.getUniformLocation(bldProg, 'u_resolution'), uRes); gl.uniform4fv(gl.getUniformLocation(bldProg, 'u_camera'), uCam);
@@ -483,7 +562,29 @@ window.addEventListener('DOMContentLoaded', () => {
           gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, MAX_BUILDINGS);
         }
 
-        // Vehicles
+        // ============================================================
+        // RENDER LAYER 4: Mobile Entities (characters, units, resources)
+        // Trees, bushes, gold, loot, characters - drawn on top of buildings
+        // ============================================================
+        gl.useProgram(entProg);
+        gl.uniform2fv(gl.getUniformLocation(entProg, 'u_resolution'), uRes); gl.uniform4fv(gl.getUniformLocation(entProg, 'u_camera'), uCam);
+        gl.bindVertexArray(entVao);
+        gl.bindBuffer(gl.ARRAY_BUFFER, instPosXVbo); gl.bufferData(gl.ARRAY_BUFFER, positionX, gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(1, 1);
+        gl.bindBuffer(gl.ARRAY_BUFFER, instPosYVbo); gl.bufferData(gl.ARRAY_BUFFER, positionY, gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(2, 1);
+        gl.bindBuffer(gl.ARRAY_BUFFER, instTypeVbo); gl.bufferData(gl.ARRAY_BUFFER, traitBitmask, gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 1, gl.UNSIGNED_INT, false, 0, 0); gl.vertexAttribDivisor(3, 1);
+        gl.bindBuffer(gl.ARRAY_BUFFER, instGroupVbo); gl.bufferData(gl.ARRAY_BUFFER, groupAffiliations, gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 1, gl.INT, false, 8 * 4, 0); gl.vertexAttribDivisor(4, 1);
+        gl.bindBuffer(gl.ARRAY_BUFFER, instHealthVbo); gl.bufferData(gl.ARRAY_BUFFER, health, gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 1, gl.INT, false, 0, 0); gl.vertexAttribDivisor(5, 1);
+        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, MAX_ENTITIES);
+
+        // ============================================================
+        // RENDER LAYER 5: Vehicles (carts, boats, helicopters)
+        // Drawn on top of entities
+        // ============================================================
         if (vehPositionX) {
           gl.useProgram(vehProg);
           gl.uniform2fv(gl.getUniformLocation(vehProg, 'u_resolution'), uRes); gl.uniform4fv(gl.getUniformLocation(vehProg, 'u_camera'), uCam);
@@ -498,6 +599,12 @@ window.addEventListener('DOMContentLoaded', () => {
           gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 1, gl.INT, false, 0, 0); gl.vertexAttribDivisor(4, 1);
           gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, MAX_VEHICLES);
         }
+
+        // ============================================================
+        // RENDER LAYER 6: UI Panels, Text, Selection Indicators
+        // (Handled by React/App.tsx overlay - rendered via DOM)
+        // ============================================================
+        
         requestAnimationFrame(render);
     }
 
@@ -510,10 +617,20 @@ window.addEventListener('DOMContentLoaded', () => {
         const inspectEntity = inspectEntityId === -1 ? null : {
             id: inspectEntityId,
             health: health[inspectEntityId],
+            maxHealth: 100,
             money: money[inspectEntityId],
             state: state[inspectEntityId],
-            inventory: entityInventory[inspectEntityId],
-            groups: Array.from(groupAffiliations.slice(inspectEntityId * 8, inspectEntityId * 8 + 8)).filter(g => g !== -1)
+            stateName: ['Idle', 'Harvesting', 'Fleeing', 'Combat', 'Returning', 'Dead', 'Trading', 'Reporting', 'Construction'][state[inspectEntityId]] || 'Unknown',
+            inventory: [],
+            tool: 0,
+            weapon: 0,
+            armor: 0,
+            positionX: positionX[inspectEntityId],
+            positionY: positionY[inspectEntityId],
+            groups: Array.from(groupAffiliations.slice(inspectEntityId * 8, inspectEntityId * 8 + 8) as unknown as number[]).filter(g => g !== -1),
+            effectiveDamage: 10,
+            effectiveSpeed: 1,
+            effectiveLifespan: 80
         };
         root.render(<App ruleRegistry={ruleRegistry} logicBytecode={logicBytecode} groupPopulation={groupPopulation} groupTotalWealth={groupTotalWealth} groupBuildingCount={groupBuildingCount} groupWood={groupWood} groupGold={groupGold} groupFood={groupFood} groupMisc={groupMisc} tickCount={tickCount} lastTickTime={lastTickDuration} avgTickTime={avgTickDuration} inspectEntity={inspectEntity} chronicle={chronicle} onFollow={() => { followEntityId = inspectEntityId; }} onClearInspect={() => { inspectEntityId = -1; followEntityId = -1; }} />);
     }
@@ -528,6 +645,7 @@ window.addEventListener('DOMContentLoaded', () => {
           vehPositionX = new Float32Array(buffers.vehPositionX); vehPositionY = new Float32Array(buffers.vehPositionY); vehType = new Uint8Array(buffers.vehType); vehOwnerGroup = new Int32Array(buffers.vehOwnerGroup);
           workers.slice(1).forEach((sw, si) => sw.postMessage({ type: "INIT", payload: { quadrantIndex: si + 1, buffers } }));
           requestAnimationFrame(render); setInterval(syncReact, 200);
+          startTick();
         }
         if (type === "TICK_COMPLETE") {
           completedWorkersThisTick++;
@@ -552,7 +670,7 @@ window.addEventListener('DOMContentLoaded', () => {
           console.error("Simulation Tick Error from worker:", payload);
           isTickInProgress = false;
           isLooping = false;
-          btnToggleLoop.textContent = "Error (Resume)";
+          btnToggleLoop.textContent = "▶";
         }
 
         if (type === "ENTITY_FOUND") { inspectEntityId = payload.id; }
@@ -568,8 +686,22 @@ window.addEventListener('DOMContentLoaded', () => {
     workers[0].postMessage({ type: "INIT", payload: { quadrantIndex: 0 } });
 
     // Expose for console testing
-    import('./simulation/state').then(S => { (window as any).S = S; });
+    import('./simulation/state').then(S => { 
+      (window as any).S = S; 
+      if (S.groupNames) {
+        (window as any).groupNames = Object.fromEntries(S.groupNames.entries());
+      }
+    });
     import('./simulation/buffs').then(B => { (window as any).Buffs = B; });
+    
+    // Sync group names periodically
+    setInterval(() => {
+      import('./simulation/state').then(S => {
+        if (S.groupNames) {
+          (window as any).groupNames = Object.fromEntries(S.groupNames.entries());
+        }
+      });
+    }, 2000);
     
     // Group management via worker messages
     (window as any).createGroup = (name: string) => {
@@ -581,6 +713,12 @@ window.addEventListener('DOMContentLoaded', () => {
     (window as any).sendEvent = (groupId: number, eventType: number) => {
       workers[0].postMessage({ type: 'SEND_EVENT', payload: { groupId, eventType } });
     };
+    (window as any).killEntity = (entityId: number) => {
+      workers[0].postMessage({ type: 'KILL_ENTITY', payload: { entityId } });
+    };
+    (window as any).selectEntity = (entityId: number) => {
+      inspectEntityId = entityId;
+    };
 
     async function handleSave() {
       const path = await save({ filters: [{ name: 'Sim', extensions: ['bin'] }] }); if (!path) return;
@@ -588,7 +726,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 
     loadBtn.onclick = async () => {
-      const file = await open({ filters: [{ name: 'Sim', extensions: ['bin'] }] }); if (!file) return;
+      const file: any = await open({ filters: [{ name: 'Sim', extensions: ['bin'] }] }); if (!file) return;
       const data = await readFile(file.path);
     };
 });

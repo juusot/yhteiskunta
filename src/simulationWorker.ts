@@ -162,6 +162,12 @@ self.onmessage = (e: MessageEvent) => {
     U.sendEventToGroup(groupId, eventType);
   }
   
+  if (type === "KILL_ENTITY") {
+    const { entityId } = data.payload;
+    S.state[entityId] = C.EntityState.Dead;
+    S.health[entityId] = 0;
+  }
+  
   if (type === "SYNC_TICK") S.setTick(data.tickCount);
   
   if (type === "FIND_ENTITY") {

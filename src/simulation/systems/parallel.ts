@@ -166,16 +166,19 @@ export function MovementSystem(): void {
       }
     }
 
+    // Calculate next potential position
     const nextX = S.positionX[i] + S.velocityX[i];
     const nextY = S.positionY[i] + S.velocityY[i];
 
-    const tileX = Math.max(0, Math.min(C.WORLD_MAP_COLS - 1, Math.floor(nextX / C.TILE_SIZE)));
-    const tileY = Math.max(0, Math.min(C.WORLD_MAP_ROWS - 1, Math.floor(nextY / C.TILE_SIZE)));
-    const tileIndex = tileY * C.WORLD_MAP_COLS + tileX;
+    // Map next position to tile grid indices
+    const nextTileX = Math.max(0, Math.min(C.WORLD_MAP_COLS - 1, Math.floor(nextX / C.TILE_SIZE)));
+    const nextTileY = Math.max(0, Math.min(C.WORLD_MAP_ROWS - 1, Math.floor(nextY / C.TILE_SIZE)));
+    const nextTileIndex = nextTileY * C.WORLD_MAP_COLS + nextTileX;
     
     let speedModifier = 1.0;
-    const terrainType = S.worldMap[tileIndex];
+    const terrainType = S.worldMap[nextTileIndex];
     
+    // Terrain-based movement modifiers
     if (terrainType === C.TerrainType.Forest) speedModifier = 0.6;
     if (terrainType === C.TerrainType.Water) speedModifier = 0.3;
     if (terrainType === C.TerrainType.Mountain) {
@@ -185,6 +188,54 @@ export function MovementSystem(): void {
       continue;
     }
 
+    // Building collision detection - check if next position overlaps with any solid building
+    let blockedByBuilding = false;
+    const entityRadius = 3.0; // Approximate entity collision radius
+    
+    // Check buildings in the target tile's spatial hash cell for efficiency
+    const cellX = Math.floor(nextX / C.GRID_SIZE);
+    const cellY = Math.floor(nextY / C.GRID_SIZE);
+    const cellIndex = cellY * C.GRID_COLS + cellX;
+    
+    if (cellX >= 0 && cellX < C.GRID_COLS && cellY >= 0 && cellY < C.GRID_ROWS) {
+      let bldId = S.bldSpatialHead[cellIndex];
+      while (bldId !== -1) {
+        const bldType = S.bldType[bldId];
+        // Only solid buildings block movement (Warehouse, House, Tower, Wall)
+        // Field (type 5) is passable for harvesting
+        const isSolid = bldType === C.BuildingType.Warehouse || 
+                        bldType === C.BuildingType.House || 
+                        bldType === C.BuildingType.Tower || 
+                        bldType === C.BuildingType.Wall;
+        
+        if (isSolid && S.bldHealth[bldId] > 0) {
+          const bldX = S.bldPositionX[bldId];
+          const bldY = S.bldPositionY[bldId];
+          // Building footprint varies by type
+          const bldSize = bldType === C.BuildingType.Warehouse ? 16.0 : 10.0;
+          const minDist = (bldSize / 2) + entityRadius;
+          
+          const dx = nextX - bldX;
+          const dy = nextY - bldY;
+          const distSq = dx * dx + dy * dy;
+          
+          if (distSq < minDist * minDist) {
+            blockedByBuilding = true;
+            break;
+          }
+        }
+        bldId = S.bldSpatialNext[bldId];
+      }
+    }
+    
+    // If blocked by building, stop movement
+    if (blockedByBuilding) {
+      S.velocityX[i] = 0;
+      S.velocityY[i] = 0;
+      continue;
+    }
+
+    // Apply movement with terrain modifier
     S.positionX[i] += S.velocityX[i] * speedModifier; 
     S.positionY[i] += S.velocityY[i] * speedModifier;
     
@@ -364,6 +415,7 @@ export function AutonomySystem(): void {
         }
         
         if (!hasField) {
+          let fieldBuilt = false;
           // Find empty building slot
           for (let b = 0; b < C.MAX_BUILDINGS; b++) {
             if (S.bldType[b] === 0) {
@@ -382,12 +434,13 @@ export function AutonomySystem(): void {
                 S.actionTimer[i] = 120;
                 Atomics.add(S.groupBuildingCount, gid, 1);
                 Atomics.sub(S.groupTotalWealth, gid, 200);  // Wood cost
-                continue;  // Skip idle state
+                fieldBuilt = true;
               }
               // If not in influence, don't build (silent fail)
               break;
             }
           }
+          if (fieldBuilt) continue; // Skip idle state
         }
       }
     }
