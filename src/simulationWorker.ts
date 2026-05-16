@@ -26,6 +26,7 @@ function tick(): void {
       M.InfluenceSystem();
     }
     M.GroupKnowledgeDecaySystem();
+    M.BuffSystem();  // Run once per day (3600 ticks)
   }
 
   // Phase 2: Autonomy & Steering
@@ -144,6 +145,21 @@ self.onmessage = (e: MessageEvent) => {
   if (type === "GROUP_COMMAND") {
     const payload = data.payload || data;
     U.broadcastGroupCommand(payload.groupId, payload.commandState, payload.targetX, payload.targetY);
+  }
+  
+  if (type === "CREATE_GROUP") {
+    const { name } = data.payload;
+    U.createGroup(name);
+  }
+  
+  if (type === "ASSIGN_TO_GROUP") {
+    const { entityId, groupId, slot } = data.payload;
+    U.assignCharacterToGroup(entityId, groupId, slot);
+  }
+  
+  if (type === "SEND_EVENT") {
+    const { groupId, eventType } = data.payload;
+    U.sendEventToGroup(groupId, eventType);
   }
   
   if (type === "SYNC_TICK") S.setTick(data.tickCount);

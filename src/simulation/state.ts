@@ -29,6 +29,16 @@ export let charWeapon: Int8Array;
 export let charArmor: Int8Array;
 export let charTool: Int8Array;
 
+// Phase 21: Character Base Stats
+export let lifespan: Int16Array;        // Base years (default: 80)
+export let damage: Int16Array;          // Base damage (default: 10)
+export let speed: Float32Array;         // Base movement multiplier (default: 1.0)
+
+// Phase 21: Effective Stats (cached, updated on buff change)
+export let effectiveLifespan: Int16Array;   // Base + buffs
+export let effectiveDamage: Int16Array;     // Base + buffs
+export let effectiveSpeed: Float32Array;    // Base × buffs
+
 // Spatial Partitioning Arrays (Local to each worker)
 export let spatialHead: Int32Array;
 export let spatialNext: Int32Array;
@@ -45,6 +55,9 @@ export let groupTargetEntityId: Int32Array;
 export let groupTargetX: Float32Array;
 export let groupTargetY: Float32Array;
 export let groupTargetAge: Int32Array;
+
+// Phase 21: Group Metadata
+export let groupCreatedAt: Int32Array;  // Game day when group was created
 
 // Phase 12: Group Logistics
 export let groupWarehouseX: Float32Array;
@@ -111,6 +124,15 @@ export let minX = 0, maxX = 1600, minY = 0, maxY = 1200;
 export let tickCount = 0;
 export let isPaused = false;
 
+// Phase 21: Game Time
+export let gameDay = 0;
+export let gameMonth = 0;
+export let gameYear = 0;
+export let tickInDay = 0;
+
+// Phase 21: Group Names (sparse storage, not SharedArrayBuffer)
+export let groupNames: Map<number, string>;
+
 export function setQuadrantIndex(idx: number) {
   quadrantIndex = idx;
   if (quadrantIndex === 0) { minX = 0; maxX = 800; minY = 0; maxY = 600; }
@@ -141,7 +163,7 @@ export function initializeState(): void {
   targetVehicleId.fill(-1);
   isMounted = new Uint8Array(new SharedArrayBuffer(C.MAX_ENTITIES));
   isMounted.fill(0);
-  pendingEvents = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4 * 4));
+  pendingEvents = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * C.EVENT_SLOTS_PER_CHARACTER * 4));
   carriedIntelEntityId = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
   carriedIntelX = new Float32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
   carriedIntelY = new Float32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
@@ -150,18 +172,26 @@ export function initializeState(): void {
   charWeapon = new Int8Array(new SharedArrayBuffer(C.MAX_ENTITIES));
   charArmor = new Int8Array(new SharedArrayBuffer(C.MAX_ENTITIES));
   charTool = new Int8Array(new SharedArrayBuffer(C.MAX_ENTITIES));
-  groupAffiliations = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 8 * 4));
+  lifespan = new Int16Array(new SharedArrayBuffer(C.MAX_ENTITIES * 2));
+  damage = new Int16Array(new SharedArrayBuffer(C.MAX_ENTITIES * 2));
+  speed = new Float32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
+  effectiveLifespan = new Int16Array(new SharedArrayBuffer(C.MAX_ENTITIES * 2));
+  effectiveDamage = new Int16Array(new SharedArrayBuffer(C.MAX_ENTITIES * 2));
+  effectiveSpeed = new Float32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
+  groupAffiliations = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * C.GROUP_SLOTS_PER_CHARACTER * 4));
   activeCommandPriority = new Uint8Array(new SharedArrayBuffer(C.MAX_ENTITIES * 1));
   activePrioritySlot = new Int8Array(new SharedArrayBuffer(C.MAX_ENTITIES * 1));
   groupTargetEntityId = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   groupTargetX = new Float32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   groupTargetY = new Float32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   groupTargetAge = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
+  groupCreatedAt = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   groupWarehouseX = new Float32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   groupWarehouseY = new Float32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   groupMagicFrequency = new Int8Array(new SharedArrayBuffer(C.MAX_GROUPS));
   groupRelationsMatrix = new Int8Array(new SharedArrayBuffer(C.MAX_GROUPS * C.MAX_GROUPS));
   groupVisualArchetypes = new Int8Array(new SharedArrayBuffer(C.MAX_GROUPS));
+  groupNames = new Map<number, string>();
   ruleRegistry = new Int32Array(new SharedArrayBuffer(C.MAX_RULES * 8 * 4));
   workerSync = new Int32Array(new SharedArrayBuffer(4 * 4));
   logicBytecode = new Int32Array(new SharedArrayBuffer(C.MAX_RULES * C.MAX_BYTECODE_PER_RULE * 4));
@@ -220,6 +250,7 @@ export function mapStateBuffers(buffers: any): void {
   groupTargetX = new Float32Array(buffers.groupTargetX);
   groupTargetY = new Float32Array(buffers.groupTargetY);
   groupTargetAge = new Int32Array(buffers.groupTargetAge);
+  groupCreatedAt = new Int32Array(buffers.groupCreatedAt);
   ruleRegistry = new Int32Array(buffers.ruleRegistry);
   groupPopulationCount = new Int32Array(buffers.groupPopulationCount);
   groupBuildingCount = new Int32Array(buffers.groupBuildingCount);
@@ -234,10 +265,17 @@ export function mapStateBuffers(buffers: any): void {
   charWeapon = new Int8Array(buffers.charWeapon);
   charArmor = new Int8Array(buffers.charArmor);
   charTool = new Int8Array(buffers.charTool);
+  lifespan = new Int16Array(buffers.lifespan);
+  damage = new Int16Array(buffers.damage);
+  speed = new Float32Array(buffers.speed);
+  effectiveLifespan = new Int16Array(buffers.effectiveLifespan);
+  effectiveDamage = new Int16Array(buffers.effectiveDamage);
+  effectiveSpeed = new Float32Array(buffers.effectiveSpeed);
   groupWarehouseX = new Float32Array(buffers.groupWarehouseX);
   groupWarehouseY = new Float32Array(buffers.groupWarehouseY);
   groupRelationsMatrix = new Int8Array(buffers.groupRelationsMatrix);
   groupVisualArchetypes = new Int8Array(buffers.groupVisualArchetypes);
+  groupNames = new Map<number, string>();
   carriedIntelEntityId = new Int32Array(buffers.carriedIntelEntityId);
   carriedIntelX = new Float32Array(buffers.carriedIntelX);
   carriedIntelY = new Float32Array(buffers.carriedIntelY);

@@ -52,14 +52,15 @@ export function initializeWorld(): void {
   for (let i = 0; i < C.MAX_VEHICLES; i++) {
     S.vehType[i] = 0; S.vehHealth[i] = 0; S.vehPilotId[i] = -1; S.vehOwnerGroup[i] = -1;
   }
-
+  // Reset Groups
   for (let g = 0; g < C.MAX_GROUPS; g++) {
     S.groupTargetEntityId[g] = -1;
     S.groupTargetX[g] = 0;
     S.groupTargetY[g] = 0;
     S.groupTargetAge[g] = 0;
     S.groupMagicFrequency[g] = 0;
-    S.groupTotalWealth[g] = 5000; 
+    S.groupTotalWealth[g] = 5000;
+    S.groupCreatedAt[g] = 0; 
 
     // Assign visual archetype
     S.groupVisualArchetypes[g] = Math.floor(Math.random() * 4);
@@ -104,13 +105,21 @@ export function initializeWorld(): void {
     S.velocityX[i] = 0; S.velocityY[i] = 0;
     S.health[i] = 0; S.money[i] = 0;
     S.traitBitmask[i] = C.TRAIT_NONE;
-    const baseAffIdx = i * 8;
-    for (let s = 0; s < 8; s++) S.groupAffiliations[baseAffIdx + s] = -1;
-    const baseEventIdx = i * 4;
-    for (let s = 0; s < 4; s++) S.pendingEvents[baseEventIdx + s] = -1;
+    const baseAffIdx = i * C.GROUP_SLOTS_PER_CHARACTER;
+    for (let s = 0; s < C.GROUP_SLOTS_PER_CHARACTER; s++) S.groupAffiliations[baseAffIdx + s] = -1;
+    const baseEventIdx = i * C.EVENT_SLOTS_PER_CHARACTER;
+    for (let s = 0; s < C.EVENT_SLOTS_PER_CHARACTER; s++) S.pendingEvents[baseEventIdx + s] = -1;
     S.targetEntityId[i] = -1; S.targetBuildingId[i] = -1; S.targetVehicleId[i] = -1; S.isMounted[i] = 0; S.activeCommandPriority[i] = 0; S.activePrioritySlot[i] = -1;
     S.entityInventory[i] = 0; S.mana[i] = 100; S.carriedIntelEntityId[i] = -1;
     S.charWeapon[i] = 0; S.charArmor[i] = 0; S.charTool[i] = 0;
+    // Default stats with variance
+    S.lifespan[i] = 60 + Math.floor(Math.random() * 21);  // 60-80 years
+    S.damage[i] = 10 + Math.floor((Math.random() - 0.5) * 4);  // 8-12 (±20%)
+    S.speed[i] = 1.0 + (Math.random() - 0.5) * 0.4;  // 0.8-1.2 (±20%)
+    // Initialize effective stats = base stats (no buffs yet)
+    S.effectiveLifespan[i] = S.lifespan[i];
+    S.effectiveDamage[i] = S.damage[i];
+    S.effectiveSpeed[i] = S.speed[i];
   }
 
   // Spawn 20 members for each nation
@@ -126,7 +135,15 @@ export function initializeWorld(): void {
       S.velocityY[i] = (Math.random() - 0.5);
       S.health[i] = 100;
       S.money[i] = 1000;
-      S.groupAffiliations[i * 8] = g;
+      S.groupAffiliations[i * C.GROUP_SLOTS_PER_CHARACTER] = g;
+      // Default stats with variance for spawned characters
+      S.lifespan[i] = 60 + Math.floor(Math.random() * 21);  // 60-80 years
+      S.damage[i] = 10 + Math.floor((Math.random() - 0.5) * 4);  // 8-12 (±20%)
+      S.speed[i] = 1.0 + (Math.random() - 0.5) * 0.4;  // 0.8-1.2 (±20%)
+      // Initialize effective stats = base stats (no buffs yet)
+      S.effectiveLifespan[i] = S.lifespan[i];
+      S.effectiveDamage[i] = S.damage[i];
+      S.effectiveSpeed[i] = S.speed[i];
     }
   }
 

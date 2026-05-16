@@ -2,6 +2,7 @@
 import * as C from '../constants';
 import * as S from '../state';
 import * as U from '../utils';
+import * as B from '../buffs';
 
 export function SpatialUpdateSystem(): void {
   // Clear local domain in spatialHead + ghost cells (50px padding)
@@ -99,6 +100,12 @@ export function LifeSystem(): void {
            if (rel < -50) S.health[i] -= 2;
         }
       }
+    }
+    
+    // Slow Update Cycle: Check group building visits (every 60 ticks = 1 second)
+    // This is when characters inherit group buffs/traits
+    if (S.tickCount % 60 === 0) {
+      B.checkGroupVisit(i);
     }
 
     if (S.state[i] === C.EntityState.Harvesting && S.targetEntityId[i] !== -1) {

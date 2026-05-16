@@ -163,3 +163,132 @@ export function waitForAll(phase: number): void {
     }
   }
 }
+
+/**
+ * Create a new group
+ * @param name - User-friendly name for the group
+ * @param ownerId - Optional owning group (for hierarchies)
+ * @returns Group ID (0 to MAX_GROUPS-1)
+ */
+export function createGroup(name: string, ownerId: number = -1): number {
+  // Find empty slot
+  for (let g = 0; g < C.MAX_GROUPS; g++) {
+    if (S.groupPopulationCount[g] === 0 && S.groupBuildingCount[g] === 0) {
+      // Initialize group
+      S.groupTotalWealth[g] = 1000;  // Starting wealth
+      S.groupCreatedAt[g] = S.gameDay + S.gameMonth * C.DAYS_PER_MONTH + S.gameYear * C.DAYS_PER_MONTH * C.MONTHS_PER_YEAR;
+      S.groupNames.set(g, name);
+      
+      // Create a virtual warehouse building so SummarySystem doesn't delete the group
+      // Find empty building slot
+      for (let b = 0; b < C.MAX_BUILDINGS; b++) {
+        if (S.bldType[b] === 0) {
+          S.bldType[b] = C.BuildingType.Warehouse;
+          S.bldHealth[b] = 1000;
+          S.bldOwnerGroup[b] = g;
+          S.bldPositionX[b] = 100 + g * 50;  // Spread out
+          S.bldPositionY[b] = 100 + g * 50;
+          S.bldInventory[b * 4 + 1] = 1000;  // Gold in warehouse
+          S.groupBuildingCount[g] = 1;
+          break;
+        }
+      }
+      
+      console.log(`Group created: ${name} (ID: ${g})`);
+      
+      // Notify main thread to update UI
+      if (S.quadrantIndex === 0) {
+        self.postMessage({ type: 'GROUP_CREATED', payload: { groupId: g, name } });
+      }
+      
+      return g;
+    }
+  }
+  console.error('No empty group slots available!');
+  return -1;
+}
+
+/**
+ * Assign a character to a group in a specific slot
+ * @param entityId - Character ID
+ * @param groupId - Group ID to assign to
+ * @param slot - Slot index (0 = highest priority, 7 = lowest)
+ */
+export function assignCharacterToGroup(entityId: number, groupId: number, slot: number): boolean {
+  if (entityId < 0 || entityId >= C.MAX_ENTITIES) return false;
+  if (groupId < 0 || groupId >= C.MAX_GROUPS) return false;
+  if (slot < 0 || slot >= C.GROUP_SLOTS_PER_CHARACTER) return false;
+  
+  const baseIdx = entityId * C.GROUP_SLOTS_PER_CHARACTER;
+  S.groupAffiliations[baseIdx + slot] = groupId;
+  
+  console.log(`Entity ${entityId} assigned to Group ${groupId} (slot ${slot})`);
+  return true;
+}
+
+/**
+ * Remove a character from a group slot
+ * @param entityId - Character ID
+ * @param slot - Slot index to clear
+ */
+export function removeCharacterFromGroup(entityId: number, slot: number): boolean {
+  if (entityId < 0 || entityId >= C.MAX_ENTITIES) return false;
+  if (slot < 0 || slot >= C.GROUP_SLOTS_PER_CHARACTER) return false;
+  
+  const baseIdx = entityId * C.GROUP_SLOTS_PER_CHARACTER;
+  S.groupAffiliations[baseIdx + slot] = -1;
+  
+  console.log(`Entity ${entityId} removed from group slot ${slot}`);
+  return true;
+}
+
+/**
+ * Get all characters in a group
+ * @param groupId - Group ID
+ * @returns Array of entity IDs
+ */
+export function getGroupMembers(groupId: number): number[] {
+  const members: number[] = [];
+  for (let i = 0; i < C.MAX_ENTITIES; i++) {
+    if (S.state[i] === C.EntityState.Dead) continue;
+    
+    const baseIdx = i * C.GROUP_SLOTS_PER_CHARACTER;
+    for (let slot = 0; slot < C.GROUP_SLOTS_PER_CHARACTER; slot++) {
+      if (S.groupAffiliations[baseIdx + slot] === groupId) {
+        members.push(i);
+        break;
+      }
+    }
+  }
+  return members;
+}
+
+/**
+ * Send an event to all members of a group
+ * @param groupId - Group ID
+ * @param eventType - Event type code (EVENT_ATTACK, EVENT_MOVE, etc.)
+ */
+export function sendEventToGroup(groupId: number, eventType: number): number {
+  let sent = 0;
+  for (let i = 0; i < C.MAX_ENTITIES; i++) {
+    if (S.state[i] === C.EntityState.Dead) continue;
+    
+    const baseIdx = i * C.GROUP_SLOTS_PER_CHARACTER;
+    for (let slot = 0; slot < C.GROUP_SLOTS_PER_CHARACTER; slot++) {
+      if (S.groupAffiliations[baseIdx + slot] === groupId) {
+        // Add event to first empty slot
+        const eventBase = i * C.EVENT_SLOTS_PER_CHARACTER;
+        for (let eventSlot = 0; eventSlot < C.EVENT_SLOTS_PER_CHARACTER; eventSlot++) {
+          if (S.pendingEvents[eventBase + eventSlot] === -1) {
+            S.pendingEvents[eventBase + eventSlot] = eventType;
+            sent++;
+            break;
+          }
+        }
+        break;  // Only send once per entity
+      }
+    }
+  }
+  console.log(`Event ${eventType} sent to ${sent} members of Group ${groupId}`);
+  return sent;
+}

@@ -71,6 +71,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const btnToggleLoop = document.getElementById('btn-toggle-loop') as HTMLButtonElement;
     const btnSingleStep = document.getElementById('btn-single-step') as HTMLButtonElement;
     const btnTerritoryToggle = document.getElementById('btn-territory-toggle') as HTMLButtonElement;
+    const gameTimeDisplay = document.getElementById('gameTimeDisplay') as HTMLDivElement;
 
     // --- Shaders ---
     const TILE_VS = `#version 300 es
@@ -311,7 +312,7 @@ window.addEventListener('DOMContentLoaded', () => {
     let positionX: Float32Array, positionY: Float32Array, traitBitmask: Uint32Array, groupAffiliations: Int32Array;
     let health: Int32Array, money: Int32Array, state: Uint8Array, entityInventory: Int16Array;
     let worldMap: Uint8Array, territoryOwnerMap: Int32Array, influenceMap: Int16Array, workerSync: Int32Array;
-    let ruleRegistry: Int32Array, logicBytecode: Int32Array, groupPopulation: Int32Array, groupTotalWealth: Int32Array;
+    let ruleRegistry: Int32Array, logicBytecode: Int32Array, groupPopulation: Int32Array, groupTotalWealth: Int32Array, groupBuildingCount: Int32Array;
     let groupWood: Int32Array, groupGold: Int32Array, groupFood: Int32Array, groupMisc: Int32Array;
     let bldPositionX: Float32Array, bldPositionY: Float32Array, bldType: Uint8Array, bldHealth: Int32Array, bldOwnerGroup: Int32Array;
     let vehPositionX: Float32Array, vehPositionY: Float32Array, vehType: Uint8Array, vehOwnerGroup: Int32Array;
@@ -514,7 +515,7 @@ window.addEventListener('DOMContentLoaded', () => {
             inventory: entityInventory[inspectEntityId],
             groups: Array.from(groupAffiliations.slice(inspectEntityId * 8, inspectEntityId * 8 + 8)).filter(g => g !== -1)
         };
-        root.render(<App ruleRegistry={ruleRegistry} logicBytecode={logicBytecode} groupPopulation={groupPopulation} groupTotalWealth={groupTotalWealth} groupWood={groupWood} groupGold={groupGold} groupFood={groupFood} groupMisc={groupMisc} tickCount={tickCount} lastTickTime={lastTickDuration} avgTickTime={avgTickDuration} inspectEntity={inspectEntity} chronicle={chronicle} onFollow={() => { followEntityId = inspectEntityId; }} onClearInspect={() => { inspectEntityId = -1; followEntityId = -1; }} />);
+        root.render(<App ruleRegistry={ruleRegistry} logicBytecode={logicBytecode} groupPopulation={groupPopulation} groupTotalWealth={groupTotalWealth} groupBuildingCount={groupBuildingCount} groupWood={groupWood} groupGold={groupGold} groupFood={groupFood} groupMisc={groupMisc} tickCount={tickCount} lastTickTime={lastTickDuration} avgTickTime={avgTickDuration} inspectEntity={inspectEntity} chronicle={chronicle} onFollow={() => { followEntityId = inspectEntityId; }} onClearInspect={() => { inspectEntityId = -1; followEntityId = -1; }} />);
     }
 
     workers.forEach((w, i) => {
@@ -522,7 +523,7 @@ window.addEventListener('DOMContentLoaded', () => {
         const { type, payload, buffers } = e.data;
         if (type === "INITIALIZED") {
           console.log("Worker 0 initialized, mapping buffers...");
-          positionX = new Float32Array(buffers.positionX); positionY = new Float32Array(buffers.positionY); traitBitmask = new Uint32Array(buffers.traitBitmask); groupAffiliations = new Int32Array(buffers.groupAffiliations); health = new Int32Array(buffers.health); money = new Int32Array(buffers.money); state = new Uint8Array(buffers.state); entityInventory = new Int16Array(buffers.entityInventory); worldMap = new Uint8Array(buffers.worldMap); territoryOwnerMap = new Int32Array(buffers.territoryOwnerMap); influenceMap = new Int16Array(buffers.influenceMap); workerSync = new Int32Array(buffers.workerSync); ruleRegistry = new Int32Array(buffers.ruleRegistry); logicBytecode = new Int32Array(buffers.logicBytecode); groupPopulation = new Int32Array(buffers.groupPopulationCount); groupTotalWealth = new Int32Array(buffers.groupTotalWealth); groupWood = new Int32Array(buffers.groupWood); groupGold = new Int32Array(buffers.groupGold); groupFood = new Int32Array(buffers.groupFood); groupMisc = new Int32Array(buffers.groupMisc);
+          positionX = new Float32Array(buffers.positionX); positionY = new Float32Array(buffers.positionY); traitBitmask = new Uint32Array(buffers.traitBitmask); groupAffiliations = new Int32Array(buffers.groupAffiliations); health = new Int32Array(buffers.health); money = new Int32Array(buffers.money); state = new Uint8Array(buffers.state); entityInventory = new Int16Array(buffers.entityInventory); worldMap = new Uint8Array(buffers.worldMap); territoryOwnerMap = new Int32Array(buffers.territoryOwnerMap); influenceMap = new Int16Array(buffers.influenceMap); workerSync = new Int32Array(buffers.workerSync); ruleRegistry = new Int32Array(buffers.ruleRegistry); logicBytecode = new Int32Array(buffers.logicBytecode); groupPopulation = new Int32Array(buffers.groupPopulationCount); groupTotalWealth = new Int32Array(buffers.groupTotalWealth); groupBuildingCount = new Int32Array(buffers.groupBuildingCount); groupWood = new Int32Array(buffers.groupWood); groupGold = new Int32Array(buffers.groupGold); groupFood = new Int32Array(buffers.groupFood); groupMisc = new Int32Array(buffers.groupMisc);
           bldPositionX = new Float32Array(buffers.bldPositionX); bldPositionY = new Float32Array(buffers.bldPositionY); bldType = new Uint8Array(buffers.bldType); bldHealth = new Int32Array(buffers.bldHealth); bldOwnerGroup = new Int32Array(buffers.bldOwnerGroup);
           vehPositionX = new Float32Array(buffers.vehPositionX); vehPositionY = new Float32Array(buffers.vehPositionY); vehType = new Uint8Array(buffers.vehType); vehOwnerGroup = new Int32Array(buffers.vehOwnerGroup);
           workers.slice(1).forEach((sw, si) => sw.postMessage({ type: "INIT", payload: { quadrantIndex: si + 1, buffers } }));
@@ -533,6 +534,13 @@ window.addEventListener('DOMContentLoaded', () => {
           if (completedWorkersThisTick === 4) {
               tickCount++; const now = performance.now(); const dt = now - lastTickStartTime; lastTickDuration = dt; tickTimes.push(dt);
               if (tickTimes.length > 60) tickTimes.shift(); avgTickDuration = tickTimes.reduce((a, b) => a + b, 0) / tickTimes.length;
+              
+              // Update game time display
+              const gameDay = Math.floor(tickCount / 3600) % 30 + 1;
+              const gameMonth = Math.floor(tickCount / (3600 * 30)) % 12 + 1;
+              const gameYear = Math.floor(tickCount / (3600 * 30 * 12)) + 1;
+              gameTimeDisplay.textContent = `Day ${gameDay}, Month ${gameMonth}, Year ${gameYear}`;
+              
               isTickInProgress = false;
               if (isLooping) {
                   if (targetTPS === 0) startTick();
@@ -550,10 +558,29 @@ window.addEventListener('DOMContentLoaded', () => {
         if (type === "ENTITY_FOUND") { inspectEntityId = payload.id; }
         if (type === "MAGIC_BURST") { addChronicle(`Magic Burst from Group ${groupAffiliations[payload.entityId * 8] || '?'}`); }
         if (type === "SAVE_REQUEST") handleSave();
+        if (type === "GROUP_CREATED") {
+          // Force React to re-render by updating tickCount (triggers stats refresh)
+          tickCount++;
+        }
       };
     });
 
     workers[0].postMessage({ type: "INIT", payload: { quadrantIndex: 0 } });
+
+    // Expose for console testing
+    import('./simulation/state').then(S => { (window as any).S = S; });
+    import('./simulation/buffs').then(B => { (window as any).Buffs = B; });
+    
+    // Group management via worker messages
+    (window as any).createGroup = (name: string) => {
+      workers[0].postMessage({ type: 'CREATE_GROUP', payload: { name } });
+    };
+    (window as any).assignToGroup = (entityId: number, groupId: number, slot: number) => {
+      workers[0].postMessage({ type: 'ASSIGN_TO_GROUP', payload: { entityId, groupId, slot } });
+    };
+    (window as any).sendEvent = (groupId: number, eventType: number) => {
+      workers[0].postMessage({ type: 'SEND_EVENT', payload: { groupId, eventType } });
+    };
 
     async function handleSave() {
       const path = await save({ filters: [{ name: 'Sim', extensions: ['bin'] }] }); if (!path) return;

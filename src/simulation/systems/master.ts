@@ -2,6 +2,7 @@
 import * as C from '../constants';
 import * as S from '../state';
 import * as U from '../utils';
+import * as B from '../buffs';
 
 export function SummarySystem(): void {
   if (S.tickCount % 60 !== 0) return;
@@ -402,5 +403,23 @@ export function InfluenceSystem(): void {
     } else {
       S.settlementTimerMap[i] = 0;
     }
+  }
+}
+
+/**
+ * Buff System - runs once per game day
+ * Clears expired buffs and recalculates effective stats
+ */
+export function BuffSystem(): void {
+  // Only run once per day (3600 ticks)
+  if (S.tickCount % C.TICKS_PER_DAY !== 0) return;
+  
+  // Clear expired buffs for all entities with active buffs
+  B.clearAllExpiredBuffs();
+  
+  // Recalculate effective stats for all entities with buffs
+  // This is the "slow update cycle" - not every tick, just daily
+  for (const entityId of B.activeBuffs.keys()) {
+    B.recalculateEffectiveStats(entityId);
   }
 }

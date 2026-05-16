@@ -29,6 +29,14 @@ interface GroupStats {
   misc: number;
 }
 
+interface GroupInfo {
+  id: number;
+  name: string;
+  population: number;
+  wealth: number;
+  createdAt: number;
+}
+
 interface EntityInfo {
   id: number;
   health: number;
@@ -43,6 +51,7 @@ interface AppProps {
   logicBytecode: Int32Array | null;
   groupPopulation: Int32Array | null;
   groupTotalWealth: Int32Array | null;
+  groupBuildingCount: Int32Array | null;
   groupWood: Int32Array | null;
   groupGold: Int32Array | null;
   groupFood: Int32Array | null;
@@ -60,14 +69,16 @@ const OP_POP_GT = 0, OP_WEALTH_LT = 1, OP_RELATION_LT = 2, OP_DIST_GT = 3;
 const GATE_AND = 100, GATE_OR = 101, GATE_NOT = 102, OP_END = 255;
 
 export const App: React.FC<AppProps> = ({ 
-  ruleRegistry, logicBytecode, groupPopulation, groupTotalWealth, 
+  ruleRegistry, logicBytecode, groupPopulation, groupTotalWealth, groupBuildingCount,
   groupWood, groupGold, groupFood, groupMisc,
   tickCount, lastTickTime, avgTickTime, inspectEntity, chronicle,
   onFollow, onClearInspect
 }) => {
-  const [activeTab, setActiveTab] = useState<'monitor' | 'stats' | 'rules'>('stats');
+  const [activeTab, setActiveTab] = useState<'monitor' | 'stats' | 'rules' | 'groups'>('stats');
   const [stats, setStats] = useState<GroupStats[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
+  const [groups, setGroups] = useState<GroupInfo[]>([]);
+  const [newGroupName, setNewGroupName] = useState('');
   const [brushActive, setBrushActive] = useState(false);
   const [selectedGroupId, setSelectedGroupId] = useState(0);
   const [selectedTrait, setSelectedTrait] = useState(0);
@@ -80,6 +91,26 @@ export const App: React.FC<AppProps> = ({
       trait: selectedTrait
     };
   }, [brushActive, selectedGroupId, selectedTrait]);
+
+  // Update groups list
+  useEffect(() => {
+    const newGroups: GroupInfo[] = [];
+    for (let i = 0; i < 50; i++) {
+      // Only show groups that exist (have buildings or population)
+      // This prevents showing all 1000 empty group slots
+      const bldCount = groupBuildingCount?.[i] || 0;
+      if (groupPopulation[i] > 0 || bldCount > 0) {
+        newGroups.push({
+          id: i,
+          name: `Group ${i}`,
+          population: groupPopulation[i],
+          wealth: groupTotalWealth[i],
+          createdAt: 0
+        });
+      }
+    }
+    setGroups(newGroups);
+  }, [tickCount, groupPopulation, groupTotalWealth, groupBuildingCount]);
 
   // Update stats
   useEffect(() => {
@@ -170,7 +201,7 @@ export const App: React.FC<AppProps> = ({
     <div className="h-full flex flex-col bg-white text-black font-mono">
       {/* Tabs */}
       <div className="flex border-b-2 border-black">
-        {(['stats', 'monitor', 'rules'] as const).map(tab => (
+        {(['stats', 'monitor', 'groups', 'rules'] as const).map(tab => (
           <button 
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -239,6 +270,81 @@ export const App: React.FC<AppProps> = ({
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {activeTab === 'groups' && (
+          <div className="space-y-3">
+            <h2 className="bg-purple-600 text-white px-2 py-1 text-sm font-bold uppercase mb-2">Group Management</h2>
+            
+            {/* Create Group */}
+            <div className="bg-gray-100 p-3 border-2 border-black space-y-2">
+              <h3 className="text-xs font-bold uppercase">Create New Group</h3>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newGroupName}
+                  onChange={(e) => setNewGroupName(e.target.value)}
+                  placeholder="Group name..."
+                  className="flex-1 border border-black px-2 py-1 text-xs"
+                />
+                <button
+                  onClick={() => {
+                    if (newGroupName.trim() && (window as any).createGroup) {
+                      (window as any).createGroup(newGroupName.trim());
+                      setNewGroupName('');
+                    }
+                  }}
+                  className="bg-green-500 text-white px-3 py-1 text-xs font-bold border-2 border-black"
+                >
+                  CREATE
+                </button>
+              </div>
+            </div>
+
+            {/* Group List */}
+            <div className="space-y-2">
+              <h3 className="text-xs font-bold uppercase">Existing Groups</h3>
+              {groups.map(g => (
+                <div key={g.id} className="bg-gray-50 p-2 border border-black">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-bold">{g.name} (ID: {g.id})</span>
+                    <span>{g.population} pop</span>
+                  </div>
+                  <div className="text-[10px] text-gray-600 mt-1">
+                    Wealth: {g.wealth.toLocaleString()}
+                  </div>
+                  <div className="flex gap-2 mt-2">
+                    <button
+                      onClick={() => {
+                        const entityId = prompt('Enter entity ID to assign:');
+                        const slot = prompt('Enter slot (0-7):');
+                        if (entityId && slot && (window as any).assignToGroup) {
+                          (window as any).assignToGroup(parseInt(entityId), g.id, parseInt(slot));
+                        }
+                      }}
+                      className="bg-blue-500 text-white px-2 py-1 text-[10px] border-2 border-black"
+                    >
+                      ASSIGN MEMBER
+                    </button>
+                    <button
+                      onClick={() => {
+                        const eventType = prompt('Event type (99=attack, 100=move, 101=recruit):');
+                        if (eventType && (window as any).sendEvent) {
+                          (window as any).sendEvent(g.id, parseInt(eventType));
+                        }
+                      }}
+                      className="bg-orange-500 text-white px-2 py-1 text-[10px] border-2 border-black"
+                    >
+                      SEND EVENT
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {groups.length === 0 && (
+                <div className="text-gray-400 text-xs italic">No groups with population yet.</div>
+              )}
+            </div>
           </div>
         )}
 

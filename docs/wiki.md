@@ -10,10 +10,13 @@
 2. [Resources](#resources)
 3. [Characters](#characters)
 4. [Groups & Nations](#groups--nations)
-5. [Buildings](#buildings)
-6. [AI & Behavior](#ai--behavior)
-7. [Combat](#combat)
-8. [Territory & Influence](#territory--influence)
+5. [Group Hierarchy System](#group-hierarchy-system) ⭐ NEW
+6. [Buff System](#buff-system) ⭐ NEW
+7. [Game Time](#game-time) ⭐ NEW
+8. [Buildings](#buildings)
+9. [AI & Behavior](#ai--behavior)
+10. [Combat](#combat)
+11. [Territory & Influence](#territory--influence)
 
 ---
 
@@ -166,6 +169,168 @@ Characters check group orders every tick and obey based on affiliation priority 
 - Relations increase via trade
 - Relations < -50: Automatic combat declaration
 - Relations >= 0: Trade possible
+
+---
+
+## Group Hierarchy System ⭐
+
+### 8-Slot Priority System
+
+Each character can belong to **up to 8 groups** simultaneously:
+
+```
+Slot 0: Highest Priority (overrides all below)
+Slot 1: ↓
+Slot 2: ↓
+...
+Slot 7: Lowest Priority
+```
+
+**Example Hierarchy:**
+```
+Character: [Warrior Clan, Red Nation, Smith Guild, Fire Cult, ...]
+           ↑
+      Slot 0 (highest priority)
+
+When Warrior Clan says "attack" AND Red Nation says "defend":
+→ Character attacks (slot 0 wins)
+```
+
+### Group Management
+
+**Create Group:**
+```javascript
+// Via UI: GROUPS tab → type name → CREATE
+// Via console:
+createGroup("My Group");
+```
+
+**Assign Character:**
+```javascript
+// Via UI: Click group → ASSIGN MEMBER → enter entity ID and slot
+// Via console:
+assignToGroup(entityId, groupId, slot);  // slot: 0-7
+```
+
+**Send Event:**
+```javascript
+// Via UI: Click group → SEND EVENT → enter event type
+// Via console:
+sendEvent(groupId, eventType);
+
+// Event types:
+99 = ATTACK
+100 = MOVE
+101 = RECRUIT
+102 = TRADE
+103 = REPORT
+104 = BUILD
+105 = DISBAND
+106 = CUSTOM
+```
+
+### Key Features
+
+- Groups are "hashtags" - no hardcoded types
+- User defines meaning through rules and naming
+- Groups persist (have warehouse buildings)
+- Starting wealth: 1,000 gold
+- Characters inherit group traits on building visit
+
+---
+
+## Buff System ⭐
+
+### Overview
+
+Buffs modify character stats from various sources:
+- **Items** (cursed sword, blessed armor)
+- **Groups** (warrior clan bonuses)
+- **Regions** (cursed land debuffs)
+- **Events** (temporary power-ups)
+- **Custom** (user-defined effects)
+
+### Stats Affected
+
+| Stat | Base Range | Buff Effect |
+|------|-----------|-------------|
+| Lifespan | 60-80 years | + or - years |
+| Damage | 8-12 (±20%) | + or - flat value |
+| Speed | 0.8-1.2 (±20%) | Multiplier (0.5 = half, 2.0 = double) |
+| Health | 100 | + or - flat value |
+| Wealth | 0+ | + or - flat value |
+
+### How Buffs Work
+
+**1. Apply Buff:**
+```javascript
+Buffs.applyBuff(entityId, {
+  id: 1,
+  name: "Cursed Sword",
+  source: "item",
+  sourceId: 999,
+  stats: { damage: 100, lifespan: -15 }
+});
+```
+
+**2. Effective Stats Update:**
+- Base stats stored in arrays (`lifespan[]`, `damage[]`, `speed[]`)
+- Effective stats cached in arrays (`effectiveLifespan[]`, etc.)
+- Recalculated only when buffs change (not every tick)
+
+**3. Remove Buff:**
+```javascript
+Buffs.removeBuff(entityId, buffId);
+// Stats revert to base
+```
+
+### Slow Update Cycle
+
+Group buffs apply when character **visits group building**:
+- Check every 60 ticks (1 second)
+- Within 50 units = "visited"
+- Prevents expensive per-tick lookups
+
+**Performance:**
+- Buff application: < 1ms for 50k entities
+- Only recalculates on buff change
+- Cached effective stats for fast access
+
+---
+
+## Game Time ⭐
+
+### Time System
+
+```
+60 ticks = 1 second real-time
+3600 ticks = 1 game day (1 minute real-time)
+30 days = 1 game month
+12 months = 1 game year
+```
+
+### UI Display
+
+Top bar shows: `Day X, Month Y, Year Z`
+
+### Usage
+
+**Check Time:**
+```javascript
+S.gameDay     // Current day (0-29)
+S.gameMonth   // Current month (0-11)
+S.gameYear    // Current year
+S.tickCount   // Total ticks since start
+```
+
+**Daily Events:**
+- BuffSystem runs once per day (3600 ticks)
+- Clears expired buffs
+- Recalculates effective stats
+
+**Slow Update Cycle:**
+- Group building visits: every 60 ticks
+- Not every tick (performance optimization)
 
 ---
 
