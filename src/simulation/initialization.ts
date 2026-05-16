@@ -105,6 +105,7 @@ export function initializeWorld(): void {
     S.state[id] = C.EntityState.Idle;
     S.positionX[id] = Math.random() * C.WORLD_WIDTH;
     S.positionY[id] = Math.random() * C.WORLD_HEIGHT;
+    S.health[id] = 100;
     S.traitBitmask[id] = C.TRAIT_TREE;
   }
 }

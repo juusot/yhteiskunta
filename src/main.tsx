@@ -83,7 +83,7 @@ const ENTITY_VS = `#version 300 es
 layout(location = 0) in vec2 a_pos;
 layout(location = 1) in float i_posX;
 layout(location = 2) in float i_posY;
-layout(location = 3) in float i_type;
+layout(location = 3) in float i_trait;
 layout(location = 4) in float i_group;
 layout(location = 5) in float i_health;
 uniform vec2 u_resolution;
@@ -96,9 +96,13 @@ void main() {
     vec2 screenPos = (worldPos - u_camera.xy) * u_camera.z;
     vec2 clipPos = (screenPos / u_resolution) * 2.0 - 1.0;
     clipPos.y = -clipPos.y;
-    float size = (i_type > 0.5) ? 4.0 : 2.0; 
+    
+    // Trait bitmask bit 0 is tree
+    bool isTree = (uint(i_trait) & 1u) != 0u;
+    float size = isTree ? 4.0 : 2.0; 
+    
     gl_Position = vec4(clipPos + (a_pos * size * u_camera.z / u_resolution), 0.0, 1.0);
-    v_type = i_type;
+    v_type = i_trait;
     v_group = i_group;
     v_health = i_health;
 }`;
@@ -112,7 +116,7 @@ out vec4 outColor;
 void main() {
     if (v_health <= 0.0) discard;
     vec3 color = vec3(0.0, 0.0, 0.0);
-    if (v_type > 0.5) color = vec3(0.2, 0.5, 0.2);
+    if ((uint(v_type) & 1u) != 0u) color = vec3(0.2, 0.5, 0.2);
     else {
       if (v_group == 0.0) color = vec3(1.0, 1.0, 0.0);
       else if (v_group == 1.0) color = vec3(1.0, 0.0, 0.0);
@@ -270,10 +274,6 @@ function startTick() {
     workers.forEach(w => w.postMessage({ type: "TICK" }));
 }
 
-const entityPosBuffer = new Float32Array(MAX_ENTITIES * 2);
-const entityTypeBuffer = new Float32Array(MAX_ENTITIES);
-const entityGroupBuffer = new Float32Array(MAX_ENTITIES);
-const entityHealthBuffer = new Float32Array(MAX_ENTITIES);
 const tileTypeBuffer = new Float32Array(MAP_COLS * MAP_ROWS);
 const infOwnerBuffer = new Float32Array(MAP_COLS * MAP_ROWS);
 const infStrengthBuffer = new Float32Array(MAP_COLS * MAP_ROWS);
@@ -321,30 +321,23 @@ function render() {
     gl.uniform2fv(gl.getUniformLocation(entProg, 'u_resolution'), uRes);
     gl.uniform4fv(gl.getUniformLocation(entProg, 'u_camera'), uCam);
     
-    // We only need to pack up to the number of entities we actually want to show, 
-    // but for now let's just do a faster version of the loop.
-    const renderCount = 10000; 
-    for (let i = 0; i < renderCount; i++) {
-        entityTypeBuffer[i] = (traitBitmask[i] & (1 << 0)) ? 1.0 : 0.0;
-        entityGroupBuffer[i] = groupAffiliations[i * 8];
-        entityHealthBuffer[i] = health[i];
-    }
+    const renderCount = MAX_ENTITIES; 
     
     gl.bindVertexArray(entVao);
-    gl.bindBuffer(gl.ARRAY_BUFFER, instPosXVbo); gl.bufferData(gl.ARRAY_BUFFER, positionX.subarray(0, renderCount), gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, instPosXVbo); gl.bufferData(gl.ARRAY_BUFFER, positionX, gl.DYNAMIC_DRAW);
     gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(1, 1);
     
-    gl.bindBuffer(gl.ARRAY_BUFFER, instPosYVbo); gl.bufferData(gl.ARRAY_BUFFER, positionY.subarray(0, renderCount), gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, instPosYVbo); gl.bufferData(gl.ARRAY_BUFFER, positionY, gl.DYNAMIC_DRAW);
     gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(2, 1);
     
-    gl.bindBuffer(gl.ARRAY_BUFFER, instTypeVbo); gl.bufferData(gl.ARRAY_BUFFER, entityTypeBuffer.subarray(0, renderCount), gl.DYNAMIC_DRAW);
-    gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(3, 1);
+    gl.bindBuffer(gl.ARRAY_BUFFER, instTypeVbo); gl.bufferData(gl.ARRAY_BUFFER, traitBitmask, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 1, gl.UNSIGNED_INT, false, 0, 0); gl.vertexAttribDivisor(3, 1);
     
-    gl.bindBuffer(gl.ARRAY_BUFFER, instGroupVbo); gl.bufferData(gl.ARRAY_BUFFER, entityGroupBuffer.subarray(0, renderCount), gl.DYNAMIC_DRAW);
-    gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(4, 1);
+    gl.bindBuffer(gl.ARRAY_BUFFER, instGroupVbo); gl.bufferData(gl.ARRAY_BUFFER, groupAffiliations, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 1, gl.INT, false, 8 * 4, 0); gl.vertexAttribDivisor(4, 1);
     
-    gl.bindBuffer(gl.ARRAY_BUFFER, instHealthVbo); gl.bufferData(gl.ARRAY_BUFFER, entityHealthBuffer.subarray(0, renderCount), gl.DYNAMIC_DRAW);
-    gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(5, 1);
+    gl.bindBuffer(gl.ARRAY_BUFFER, instHealthVbo); gl.bufferData(gl.ARRAY_BUFFER, health, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 1, gl.INT, false, 0, 0); gl.vertexAttribDivisor(5, 1);
     
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, renderCount);
 
