@@ -21,9 +21,10 @@ interface AppProps {
   ruleRegistry: Int32Array | null;
   groupPopulation: Int32Array | null;
   groupTotalWealth: Int32Array | null;
+  tickCount: number;
 }
 
-export const App: React.FC<AppProps> = ({ ruleRegistry, groupPopulation, groupTotalWealth }) => {
+export const App: React.FC<AppProps> = ({ ruleRegistry, groupPopulation, groupTotalWealth, tickCount }) => {
   const [activeTab, setActiveTab] = useState<'stats' | 'rules'>('stats');
   const [stats, setStats] = useState<GroupStats[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
@@ -40,25 +41,22 @@ export const App: React.FC<AppProps> = ({ ruleRegistry, groupPopulation, groupTo
     };
   }, [brushActive, selectedGroupId, selectedTrait]);
 
-  // Poll stats
+  // Update stats when tickCount changes
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (!groupPopulation || !groupTotalWealth) return;
-      const newStats: GroupStats[] = [];
-      // Only show top 20 groups for performance/UI
-      for (let i = 0; i < 20; i++) {
-        if (groupPopulation[i] > 0) {
-          newStats.push({
-            id: i,
-            population: groupPopulation[i],
-            wealth: groupTotalWealth[i],
-          });
-        }
+    if (!groupPopulation || !groupTotalWealth) return;
+    const newStats: GroupStats[] = [];
+    for (let i = 0; i < 50; i++) { // Check first 50 groups
+      if (groupPopulation[i] > 0) {
+        newStats.push({
+          id: i,
+          population: groupPopulation[i],
+          wealth: groupTotalWealth[i],
+        });
       }
-      setStats(newStats);
-    }, 500);
-    return () => clearInterval(interval);
-  }, [groupPopulation, groupTotalWealth]);
+    }
+    newStats.sort((a, b) => b.population - a.population);
+    setStats(newStats.slice(0, 20));
+  }, [tickCount, groupPopulation, groupTotalWealth]);
 
   // Load rules
   useEffect(() => {
@@ -160,6 +158,7 @@ export const App: React.FC<AppProps> = ({ ruleRegistry, groupPopulation, groupTo
                     >
                       <option value={0}>Pop &gt;</option>
                       <option value={1}>Wealth &gt;</option>
+                      <option value={3}>Wealth &lt; (Deficit)</option>
                     </select>
                   </div>
                   <div>

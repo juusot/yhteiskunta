@@ -20,6 +20,8 @@ export const TRAIT_TREE = 1 << 0;
 export const TRAIT_AGGRESSIVE = 1 << 1;
 export const TRAIT_SCOUT = 1 << 2;
 export const TRAIT_FANATIC = 1 << 3;
+export const TRAIT_COURIER = 1 << 4;
+export const TRAIT_MAGIC = 1 << 5;
 
 export const EVENT_HOSTILE_ATTACK = 99;
 
@@ -32,6 +34,10 @@ export enum EntityState {
   Harvesting = 1,
   Fleeing = 2,
   Combat = 3,
+  ReturningToDepot = 4,
+  Dead = 5,
+  Trading = 6,
+  ReportingIntel = 7,
 }
 
 // Global Component Arrays
@@ -47,6 +53,15 @@ export let traitBitmask: Uint32Array;
 export let targetEntityId: Int32Array;
 export let pendingEvents: Int32Array;
 
+// Phase 17: Hybrid Intel
+export let carriedIntelEntityId: Int32Array;
+export let carriedIntelX: Float32Array;
+export let carriedIntelY: Float32Array;
+export let mana: Int16Array;
+
+// Phase 12: Logistics
+export let entityInventory: Int16Array;
+
 // Spatial Partitioning Arrays
 export let spatialHead: Int32Array;
 export let spatialNext: Int32Array;
@@ -59,6 +74,19 @@ export let groupTargetEntityId: Int32Array;
 export let groupTargetX: Float32Array;
 export let groupTargetY: Float32Array;
 export let groupTargetAge: Int16Array;
+
+// Phase 12: Group Logistics
+export let groupWarehouseX: Float32Array;
+export let groupWarehouseY: Float32Array;
+
+// Phase 13: Diplomacy Matrix
+export let groupRelationsMatrix: Int8Array;
+
+// Phase 14: Visual Archetypes
+export let groupVisualArchetypes: Int8Array;
+
+// Phase 17: Group Magic
+export let groupMagicFrequency: Int8Array;
 
 // Priority tracking for conflict resolution
 export let activeCommandPriority: Uint8Array;
@@ -91,6 +119,13 @@ export function initializeSimulation(): void {
   traitBitmask = new Uint32Array(new SharedArrayBuffer(MAX_ENTITIES * 4));
   targetEntityId = new Int32Array(new SharedArrayBuffer(MAX_ENTITIES * 4));
   pendingEvents = new Int32Array(new SharedArrayBuffer(MAX_ENTITIES * 4 * 4));
+  
+  carriedIntelEntityId = new Int32Array(new SharedArrayBuffer(MAX_ENTITIES * 4));
+  carriedIntelX = new Float32Array(new SharedArrayBuffer(MAX_ENTITIES * 4));
+  carriedIntelY = new Float32Array(new SharedArrayBuffer(MAX_ENTITIES * 4));
+  mana = new Int16Array(new SharedArrayBuffer(MAX_ENTITIES * 2));
+
+  entityInventory = new Int16Array(new SharedArrayBuffer(MAX_ENTITIES * 2));
 
   spatialHead = new Int32Array(new SharedArrayBuffer(NUM_CELLS * 4));
   spatialNext = new Int32Array(new SharedArrayBuffer(MAX_ENTITIES * 4));
@@ -105,11 +140,34 @@ export function initializeSimulation(): void {
   groupTargetY = new Float32Array(new SharedArrayBuffer(MAX_GROUPS * 4));
   groupTargetAge = new Int16Array(new SharedArrayBuffer(MAX_GROUPS * 2));
 
+  groupWarehouseX = new Float32Array(new SharedArrayBuffer(MAX_GROUPS * 4));
+  groupWarehouseY = new Float32Array(new SharedArrayBuffer(MAX_GROUPS * 4));
+
+  groupMagicFrequency = new Int8Array(new SharedArrayBuffer(MAX_GROUPS));
+
+  // Phase 13 & 14 Allocation
+  groupRelationsMatrix = new Int8Array(new SharedArrayBuffer(MAX_GROUPS * MAX_GROUPS));
+  groupVisualArchetypes = new Int8Array(new SharedArrayBuffer(MAX_GROUPS));
+  
+  groupRelationsMatrix.fill(0);
+
   for (let g = 0; g < MAX_GROUPS; g++) {
     groupTargetEntityId[g] = -1;
     groupTargetX[g] = 0;
     groupTargetY[g] = 0;
     groupTargetAge[g] = 0;
+    
+    // Assign visual archetype (0: Tri, 1: Circle, 2: Sq, 3: Star)
+    groupVisualArchetypes[g] = Math.floor(Math.random() * 4);
+
+    // Randomize magic frequency (Phase 17)
+    groupMagicFrequency[g] = Math.random() > 0.7 ? 1 : 0;
+
+    // Distribute warehouses around the world
+    const angle = (g / 20) * Math.PI * 2;
+    const dist = 400 + (g % 5) * 50;
+    groupWarehouseX[g] = (WORLD_WIDTH / 2) + Math.cos(angle) * dist;
+    groupWarehouseY[g] = (WORLD_HEIGHT / 2) + Math.sin(angle) * dist;
   }
 
   ruleRegistry = new Int32Array(new SharedArrayBuffer(MAX_RULES * 8 * 4));
@@ -118,7 +176,6 @@ export function initializeSimulation(): void {
   groupPopulationCount = new Int32Array(new SharedArrayBuffer(MAX_GROUPS * 4));
   groupTotalWealth = new Int32Array(new SharedArrayBuffer(MAX_GROUPS * 4));
 
-  // Phase 11 Allocation
   worldMap = new Uint8Array(new SharedArrayBuffer(WORLD_MAP_COLS * WORLD_MAP_ROWS));
   globalFlowField = new Float32Array(new SharedArrayBuffer(WORLD_MAP_COLS * WORLD_MAP_ROWS * 2 * 4));
   integrationField = new Float32Array(WORLD_MAP_COLS * WORLD_MAP_ROWS);
@@ -130,7 +187,7 @@ export function initializeSimulation(): void {
     positionY[i] = Math.random() * WORLD_HEIGHT;
     velocityX[i] = (Math.random() - 0.5) * 2;
     velocityY[i] = (Math.random() - 0.5) * 2;
-    health[i] = 100;
+    health[i] = 40 + Math.floor(Math.random() * 61);
     money[i] = 0;
     state[i] = EntityState.Idle;
     actionTimer[i] = 0;
@@ -138,6 +195,9 @@ export function initializeSimulation(): void {
     targetEntityId[i] = -1;
     activeCommandPriority[i] = 0;
     activePrioritySlot[i] = -1;
+    entityInventory[i] = 0;
+    mana[i] = 100;
+    carriedIntelEntityId[i] = -1;
     
     const baseEventIdx = i * 4;
     pendingEvents[baseEventIdx] = -1;
@@ -146,14 +206,10 @@ export function initializeSimulation(): void {
     pendingEvents[baseEventIdx + 3] = -1;
     
     const baseAffIdx = i * 8;
-    for (let s = 0; s < 8; s++) {
-      groupAffiliations[baseAffIdx + s] = -1;
-    }
+    for (let s = 0; s < 8; s++) groupAffiliations[baseAffIdx + s] = -1;
 
     groupAffiliations[baseAffIdx] = Math.floor(Math.random() * 10);
     groupAffiliations[baseAffIdx + 1] = Math.floor(Math.random() * 50);
-    groupAffiliations[baseAffIdx + 2] = Math.floor(Math.random() * 200);
-    groupAffiliations[baseAffIdx + 3] = Math.floor(Math.random() * 800);
   }
 
   for (let i = 0; i < 5000; i++) {
@@ -165,33 +221,23 @@ export function initializeSimulation(): void {
 
   for (let i = 0; i < 2000; i++) {
     const idx = Math.floor(Math.random() * MAX_ENTITIES);
-    if ((traitBitmask[idx] & TRAIT_TREE) === 0) traitBitmask[idx] |= TRAIT_AGGRESSIVE;
+    if ((traitBitmask[idx] & TRAIT_TREE) === 0) {
+      traitBitmask[idx] |= TRAIT_AGGRESSIVE;
+      if (Math.random() > 0.5) traitBitmask[idx] |= TRAIT_SCOUT;
+      if (Math.random() > 0.8) traitBitmask[idx] |= TRAIT_MAGIC;
+    }
   }
 
-  for (let i = 0; i < 5000; i++) {
-    const idx = Math.floor(Math.random() * MAX_ENTITIES);
-    if ((traitBitmask[idx] & TRAIT_TREE) === 0) traitBitmask[idx] |= TRAIT_SCOUT;
-  }
-
-  for (let i = 0; i < 5000; i++) {
-    const idx = Math.floor(Math.random() * MAX_ENTITIES);
-    if ((traitBitmask[idx] & TRAIT_TREE) === 0) traitBitmask[idx] |= TRAIT_FANATIC;
-  }
-
+  // DEFAULT RULES (Disabled)
   ruleRegistry[0] = 0; ruleRegistry[1] = 5; ruleRegistry[2] = 0; ruleRegistry[3] = 2000; 
-  ruleRegistry[4] = EntityState.Combat; ruleRegistry[5] = 800; ruleRegistry[6] = 600; ruleRegistry[7] = 1;
+  ruleRegistry[4] = EntityState.Combat; ruleRegistry[5] = 800; ruleRegistry[6] = 600; ruleRegistry[7] = 0;
 
-  ruleRegistry[8] = 0; ruleRegistry[9] = 2; ruleRegistry[10] = 1; ruleRegistry[11] = 50000; 
-  ruleRegistry[12] = EntityState.Harvesting; ruleRegistry[13] = 400; ruleRegistry[14] = 300; ruleRegistry[15] = 1;
-
-  ruleRegistry[16] = 1; ruleRegistry[17] = 0; ruleRegistry[18] = 3; ruleRegistry[19] = 10000; 
-  ruleRegistry[20] = 99; ruleRegistry[21] = 0; ruleRegistry[22] = 0; ruleRegistry[23] = 1;
+  ruleRegistry[8] = 0; ruleRegistry[9] = 2; ruleRegistry[10] = 1; ruleRegistry[11] = 1000; 
+  ruleRegistry[12] = EntityState.Harvesting; ruleRegistry[13] = 400; ruleRegistry[14] = 300; ruleRegistry[15] = 0;
 }
 
 function generateBiomes(): void {
-  worldMap.fill(0); // Grass
-
-  // Spawn a central lake
+  worldMap.fill(0);
   const centerX = WORLD_MAP_COLS / 2;
   const centerY = WORLD_MAP_ROWS / 2;
   const radius = 25;
@@ -199,25 +245,19 @@ function generateBiomes(): void {
     for (let x = 0; x < WORLD_MAP_COLS; x++) {
       const dx = x - centerX;
       const dy = y - centerY;
-      if (dx * dx + dy * dy < radius * radius) {
-        worldMap[y * WORLD_MAP_COLS + x] = 2; // Water
-      }
+      if (dx * dx + dy * dy < radius * radius) worldMap[y * WORLD_MAP_COLS + x] = 2;
     }
   }
 
-  // Scatter forest clusters
   for (let i = 0; i < 30; i++) {
     const fx = Math.floor(Math.random() * WORLD_MAP_COLS);
     const fy = Math.floor(Math.random() * WORLD_MAP_ROWS);
     const fr = Math.floor(Math.random() * 10) + 5;
     for (let y = Math.max(0, fy - fr); y < Math.min(WORLD_MAP_ROWS, fy + fr); y++) {
       for (let x = Math.max(0, fx - fr); x < Math.min(WORLD_MAP_COLS, fx + fr); x++) {
-        const dx = x - fx;
-        const dy = y - fy;
+        const dx = x - fx; const dy = y - fy;
         if (dx * dx + dy * dy < fr * fr) {
-          if (worldMap[y * WORLD_MAP_COLS + x] === 0) {
-            worldMap[y * WORLD_MAP_COLS + x] = 1; // Forest
-          }
+          if (worldMap[y * WORLD_MAP_COLS + x] === 0) worldMap[y * WORLD_MAP_COLS + x] = 1;
         }
       }
     }
@@ -227,14 +267,11 @@ function generateBiomes(): void {
 function updateFlowField(targetX: number, targetY: number): void {
   const targetTileX = Math.floor(targetX / TILE_SIZE);
   const targetTileY = Math.floor(targetY / TILE_SIZE);
-
   if (targetTileX < 0 || targetTileX >= WORLD_MAP_COLS || targetTileY < 0 || targetTileY >= WORLD_MAP_ROWS) return;
 
-  // 1. Integration Field (Dijkstra)
-  integrationField.fill(65535); // Large value
+  integrationField.fill(65535);
   const targetIdx = targetTileY * WORLD_MAP_COLS + targetTileX;
   integrationField[targetIdx] = 0;
-
   const queue: number[] = [targetIdx];
   let head = 0;
 
@@ -243,141 +280,199 @@ function updateFlowField(targetX: number, targetY: number): void {
     const currX = currIdx % WORLD_MAP_COLS;
     const currY = Math.floor(currIdx / WORLD_MAP_COLS);
     const currCost = integrationField[currIdx];
-
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
         if (dx === 0 && dy === 0) continue;
-        const nx = currX + dx;
-        const ny = currY + dy;
+        const nx = currX + dx; const ny = currY + dy;
         if (nx >= 0 && nx < WORLD_MAP_COLS && ny >= 0 && ny < WORLD_MAP_ROWS) {
           const nIdx = ny * WORLD_MAP_COLS + nx;
           const terrain = worldMap[nIdx];
           let stepCost = (dx !== 0 && dy !== 0) ? 1.4 : 1.0;
-          if (terrain === 1) stepCost *= 3; // Forest
-          if (terrain === 2) stepCost = 255; // Water (Obstacle)
-
+          if (terrain === 1) stepCost *= 3;
+          if (terrain === 2) stepCost = 255;
           const totalCost = currCost + stepCost;
-          if (totalCost < integrationField[nIdx]) {
-            integrationField[nIdx] = totalCost;
-            queue.push(nIdx);
-          }
+          if (totalCost < integrationField[nIdx]) { integrationField[nIdx] = totalCost; queue.push(nIdx); }
         }
       }
     }
   }
 
-  // 2. Vector Field Generation
   for (let y = 0; y < WORLD_MAP_ROWS; y++) {
     for (let x = 0; x < WORLD_MAP_COLS; x++) {
       const idx = y * WORLD_MAP_COLS + x;
       const fIdx = idx * 2;
-      
-      let bestX = 0;
-      let bestY = 0;
-      let minCost = integrationField[idx];
-
+      let bestX = 0; let bestY = 0; let minCost = integrationField[idx];
       for (let dy = -1; dy <= 1; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
           if (dx === 0 && dy === 0) continue;
-          const nx = x + dx;
-          const ny = y + dy;
+          const nx = x + dx; const ny = y + dy;
           if (nx >= 0 && nx < WORLD_MAP_COLS && ny >= 0 && ny < WORLD_MAP_ROWS) {
             const nCost = integrationField[ny * WORLD_MAP_COLS + nx];
-            if (nCost < minCost) {
-              minCost = nCost;
-              bestX = dx;
-              bestY = dy;
-            }
+            if (nCost < minCost) { minCost = nCost; bestX = dx; bestY = dy; }
           }
         }
       }
-
-      // Normalize
       const len = Math.sqrt(bestX * bestX + bestY * bestY);
-      if (len > 0) {
-        globalFlowField[fIdx] = bestX / len;
-        globalFlowField[fIdx + 1] = bestY / len;
-      } else {
-        globalFlowField[fIdx] = 0;
-        globalFlowField[fIdx + 1] = 0;
-      }
+      if (len > 0) { globalFlowField[fIdx] = bestX / len; globalFlowField[fIdx + 1] = bestY / len; }
+      else { globalFlowField[fIdx] = 0; globalFlowField[fIdx + 1] = 0; }
     }
   }
 }
 
 function SummarySystem(): void {
   groupPopulationCount.fill(0);
-  groupTotalWealth.fill(0);
+  let totalActive = 0;
   for (let i = 0; i < MAX_ENTITIES; i++) {
-    const primaryGroupId = groupAffiliations[i * 8];
-    if (primaryGroupId !== -1) {
-      groupPopulationCount[primaryGroupId]++;
-      groupTotalWealth[primaryGroupId] += money[i];
+    if (state[i] !== EntityState.Dead) {
+      const primaryGroupId = groupAffiliations[i * 8];
+      if (primaryGroupId >= 0 && primaryGroupId < MAX_GROUPS) {
+        groupPopulationCount[primaryGroupId]++;
+        totalActive++;
+      }
     }
   }
+
+  const starvingGroups = new Uint8Array(MAX_GROUPS);
+  for (let g = 0; g < MAX_GROUPS; g++) {
+    const pop = groupPopulationCount[g];
+    if (pop === 0) continue;
+    const foodRequired = Math.floor(pop * 0.1);
+    groupTotalWealth[g] -= foodRequired;
+    if (groupTotalWealth[g] <= 0) {
+      groupTotalWealth[g] = 0;
+      starvingGroups[g] = 1;
+    }
+  }
+
+  // Reproduction & Safety Net
+  let deadPtr = 0;
+  for (let g = 0; g < MAX_GROUPS; g++) {
+    const pop = groupPopulationCount[g];
+    const wealth = groupTotalWealth[g];
+    
+    // SAFETY NET: If group is near extinction, provide 1 free respawn per cycle
+    const needsSafetySpawn = pop < 20 && tickCount % 60 === 0;
+    // REPRODUCTION: If wealthy, allow up to 5 births
+    const canAffordReproduction = wealth > 1000 && pop < 15000;
+    
+    if (needsSafetySpawn || canAffordReproduction) {
+      let births = 0;
+      const maxBirths = needsSafetySpawn ? 1 : 5;
+      const costPerBirth = needsSafetySpawn ? 0 : 100; // One harvest trip value
+
+      while (births < maxBirths && (needsSafetySpawn || (wealth > 1000))) {
+        while (deadPtr < MAX_ENTITIES && state[deadPtr] !== EntityState.Dead) deadPtr++;
+        if (deadPtr >= MAX_ENTITIES) break;
+        
+        const i = deadPtr;
+        state[i] = EntityState.Idle;
+        health[i] = 100;
+        positionX[i] = groupWarehouseX[g];
+        positionY[i] = groupWarehouseY[g];
+        velocityX[i] = (Math.random() - 0.5);
+        velocityY[i] = (Math.random() - 0.5);
+        groupAffiliations[i * 8] = g;
+        targetEntityId[i] = -1;
+        entityInventory[i] = 0;
+        actionTimer[i] = 60;
+        
+        groupTotalWealth[g] -= costPerBirth;
+        births++;
+        deadPtr++;
+        if (needsSafetySpawn) break; // Only 1 safety spawn per group per cycle
+      }
+    }
+  }
+
+  // Starvation damage pass (Reduced from 10 to 2)
+  for (let i = 0; i < MAX_ENTITIES; i++) {
+    if (state[i] === EntityState.Dead) continue;
+    const gid = groupAffiliations[i * 8];
+    if (gid >= 0 && gid < MAX_GROUPS && starvingGroups[gid] === 1) {
+      health[i] -= 2;
+    }
+  }
+
+  // Mana Regeneration (Phase 17)
+  for (let i = 0; i < MAX_ENTITIES; i++) {
+    if ((traitBitmask[i] & TRAIT_MAGIC) !== 0) {
+      mana[i] = Math.min(100, mana[i] + 5);
+    }
+  }
+
+  self.postMessage({ type: "STATS_UPDATE", payload: { totalActive } });
 }
 
 function RuleEvaluationSystem(): void {
+  for (let gA = 0; gA < 50; gA++) {
+    if (groupPopulationCount[gA] === 0) continue;
+    for (let gB = 0; gB < 50; gB++) {
+      if (gA === gB || groupPopulationCount[gB] === 0) continue;
+      const relation = groupRelationsMatrix[gA * MAX_GROUPS + gB];
+      if (relation <= -50) {
+        broadcastGroupCommand(gA, EntityState.Combat, groupWarehouseX[gB], groupWarehouseY[gB]);
+      }
+    }
+  }
+
   let firstActiveLocationTargetX = -1;
   let firstActiveLocationTargetY = -1;
-
   for (let r = 0; r < MAX_RULES; r++) {
     const baseIdx = r * 8;
     if (ruleRegistry[baseIdx + 7] === 0) continue;
-
-    const subjectType = ruleRegistry[baseIdx + 0];
     const subjectId = ruleRegistry[baseIdx + 1];
     const conditionType = ruleRegistry[baseIdx + 2];
     const threshold = ruleRegistry[baseIdx + 3];
     const actionState = ruleRegistry[baseIdx + 4];
     const targetX = ruleRegistry[baseIdx + 5];
     const targetY = ruleRegistry[baseIdx + 6];
-
     let conditionMet = false;
-    if (subjectType === 0) {
-      if (conditionType === 0) { if (groupPopulationCount[subjectId] > threshold) conditionMet = true; }
-      else if (conditionType === 1) { if (groupTotalWealth[subjectId] > threshold) conditionMet = true; }
-    } else if (subjectType === 1) {
-      if (conditionType === 3) { if (tickCount % threshold === 0 && tickCount > 0) conditionMet = true; }
-    }
-
+    if (conditionType === 0) { if (groupPopulationCount[subjectId] > threshold) conditionMet = true; }
+    else if (conditionType === 1) { if (groupTotalWealth[subjectId] > threshold) conditionMet = true; }
+    else if (conditionType === 3) { if (groupTotalWealth[subjectId] < threshold) conditionMet = true; }
+    
     if (conditionMet) {
       if (actionState === 99) self.postMessage({ type: "SAVE_REQUEST" });
       else {
         broadcastGroupCommand(subjectId, actionState, targetX, targetY);
-        if (firstActiveLocationTargetX === -1) {
-          firstActiveLocationTargetX = targetX;
-          firstActiveLocationTargetY = targetY;
-        }
+        if (firstActiveLocationTargetX === -1) { firstActiveLocationTargetX = targetX; firstActiveLocationTargetY = targetY; }
       }
     }
   }
-
-  // Update Global Flow Field toward the most relevant active target
-  if (firstActiveLocationTargetX !== -1) {
-    updateFlowField(firstActiveLocationTargetX, firstActiveLocationTargetY);
-  }
+  if (firstActiveLocationTargetX !== -1) updateFlowField(firstActiveLocationTargetX, firstActiveLocationTargetY);
 }
 
 function LifeSystem(): void {
   for (let i = 0; i < MAX_ENTITIES; i++) {
+    if (state[i] === EntityState.Dead) continue;
     if ((traitBitmask[i] & TRAIT_TREE) !== 0) continue;
-    const decayRate = money[i] <= 0 ? 2 : 1;
-    if (tickCount % 30 === 0) health[i] -= decayRate;
+    let decayRate = 1;
+    if (money[i] > 0) decayRate = 0;
+    if (state[i] === EntityState.Harvesting || state[i] === EntityState.ReturningToDepot) decayRate = 0;
+    if (tickCount % (60 + (i % 30)) === 0) health[i] -= decayRate;
     if (state[i] === EntityState.Harvesting && targetEntityId[i] !== -1) {
-      health[i] += 1;
-      if (health[i] > 100) health[i] = 100;
+      if (tickCount % 4 === 0) { health[i]++; if (health[i] > 100) health[i] = 100; }
     }
     if (health[i] <= 0) {
-      health[i] = 100; money[i] = 0; state[i] = EntityState.Idle; actionTimer[i] = 60;
-      targetEntityId[i] = -1; activePrioritySlot[i] = -1;
-      const side = Math.floor(Math.random() * 4);
-      if (side === 0) { positionX[i] = Math.random() * WORLD_WIDTH; positionY[i] = 0; }
-      else if (side === 1) { positionX[i] = Math.random() * WORLD_WIDTH; positionY[i] = WORLD_HEIGHT; }
-      else if (side === 2) { positionX[i] = 0; positionY[i] = Math.random() * WORLD_HEIGHT; }
-      else { positionX[i] = WORLD_WIDTH; positionY[i] = Math.random() * WORLD_HEIGHT; }
-      velocityX[i] = (Math.random() - 0.5) * 2;
-      velocityY[i] = (Math.random() - 0.5) * 2;
+      // Phase 16: Raiding
+      if ((traitBitmask[i] & TRAIT_COURIER) !== 0 && entityInventory[i] > 0) {
+        const attackerId = targetEntityId[i];
+        if (attackerId >= 0 && attackerId < MAX_ENTITIES) {
+          const attackerGroup = groupAffiliations[attackerId * 8];
+          if (attackerGroup >= 0 && attackerGroup < MAX_GROUPS) {
+            groupTotalWealth[attackerGroup] += entityInventory[i];
+          }
+        }
+      }
+      state[i] = EntityState.Dead;
+      positionX[i] = -1000.0;
+      positionY[i] = -1000.0;
+      targetEntityId[i] = -1;
+      velocityX[i] = 0;
+      velocityY[i] = 0;
+      entityInventory[i] = 0;
+      actionTimer[i] = 0;
+      traitBitmask[i] = TRAIT_NONE;
     }
   }
 }
@@ -412,8 +507,7 @@ function findNearest(x: number, y: number, radius: number, filterBitmask: number
         itemsChecked++;
         if (itemsChecked >= 64) break;
         if (filterBitmask === 0xFFFFFFFF || (traitBitmask[entityId] & filterBitmask) !== 0) {
-          const dx = positionX[entityId] - x;
-          const dy = positionY[entityId] - y;
+          const dx = positionX[entityId] - x; const dy = positionY[entityId] - y;
           const distSq = dx * dx + dy * dy;
           if (distSq < minDistanceSq && distSq <= radiusSq) { minDistanceSq = distSq; closestId = entityId; }
         }
@@ -446,22 +540,14 @@ export function popNextEvent(entityId: number): number {
 
 function MovementSystem(): void {
   for (let i = 0; i < MAX_ENTITIES; i++) {
-    const worldX = positionX[i];
-    const worldY = positionY[i];
-
-    // Terrain Friction lookup
-    const tileX = Math.floor(worldX / TILE_SIZE);
-    const tileY = Math.floor(worldY / TILE_SIZE);
+    const worldX = positionX[i]; const worldY = positionY[i];
+    const tileX = Math.floor(worldX / TILE_SIZE); const tileY = Math.floor(worldY / TILE_SIZE);
     const tileIndex = Math.min(WORLD_MAP_COLS * WORLD_MAP_ROWS - 1, Math.max(0, tileY * WORLD_MAP_COLS + tileX));
-
     let speedModifier = 1.0;
     const terrainType = worldMap[tileIndex];
-    if (terrainType === 1) speedModifier = 0.6; // Forest
-    if (terrainType === 2) speedModifier = 0.2; // Water
-
-    positionX[i] += velocityX[i] * speedModifier;
-    positionY[i] += velocityY[i] * speedModifier;
-
+    if (terrainType === 1) speedModifier = 0.6;
+    if (terrainType === 2) speedModifier = 0.2;
+    positionX[i] += velocityX[i] * speedModifier; positionY[i] += velocityY[i] * speedModifier;
     if (positionX[i] < 0) { positionX[i] = 0; velocityX[i] *= -1; }
     else if (positionX[i] > 1600) { positionX[i] = 1600; velocityX[i] *= -1; }
     if (positionY[i] < 0) { positionY[i] = 0; velocityY[i] *= -1; }
@@ -472,8 +558,22 @@ function MovementSystem(): void {
 function AutonomySystem(): void {
   for (let i = 0; i < MAX_ENTITIES; i++) {
     if ((traitBitmask[i] & TRAIT_TREE) !== 0) continue;
-    if (actionTimer[i] > 0) { actionTimer[i]--; }
-    else {
+    if (actionTimer[i] > 0) {
+      actionTimer[i]--;
+    } else {
+      if (state[i] === EntityState.Harvesting && targetEntityId[i] !== -1) {
+        entityInventory[i] += 10;
+        state[i] = EntityState.ReturningToDepot;
+        targetEntityId[i] = -1;
+        actionTimer[i] = 0; 
+        continue; 
+      }
+      if (state[i] === EntityState.ReturningToDepot) {
+         const nextEvent = pendingEvents[i * 4];
+         if (nextEvent === EVENT_HOSTILE_ATTACK) { popNextEvent(i); state[i] = EntityState.Fleeing; actionTimer[i] = 180; continue; }
+         continue; 
+      }
+
       activePrioritySlot[i] = -1;
       const nextEvent = pendingEvents[i * 4];
       if (nextEvent !== -1) {
@@ -484,6 +584,7 @@ function AutonomySystem(): void {
           activeCommandPriority[i] = 0; activePrioritySlot[i] = -1; continue;
         }
       }
+
       if (state[i] === EntityState.Idle || activePrioritySlot[i] !== -1) {
         const baseIdx = i * 8;
         let foundHigherPriority = false;
@@ -493,17 +594,19 @@ function AutonomySystem(): void {
           const groupId = groupAffiliations[baseIdx + s];
           if (groupId !== -1) {
             const targetId = groupTargetEntityId[groupId];
-            if (targetId !== -1) { targetEntityId[i] = targetId; state[i] = EntityState.Combat; actionTimer[i] = 300;
+            if (targetId !== -1) { 
+              targetEntityId[i] = targetId; state[i] = EntityState.Combat; actionTimer[i] = 300;
               activeCommandPriority[i] = 8 - s; activePrioritySlot[i] = s; foundHigherPriority = true; break;
             }
           }
         }
         if (foundHigherPriority) continue;
         if (state[i] !== EntityState.Idle) continue;
+        
         const rand = Math.random();
         let nextState: number;
-        if (rand > 0.3) nextState = EntityState.Harvesting;
-        else if (rand > 0.1) nextState = EntityState.Fleeing;
+        if (rand > 0.4) nextState = EntityState.Harvesting;
+        else if (rand > 0.2) nextState = EntityState.Fleeing;
         else nextState = EntityState.Combat;
         state[i] = nextState;
         const canSearch = (tickCount + i) % 15 === 0;
@@ -511,19 +614,18 @@ function AutonomySystem(): void {
           if (canSearch && targetEntityId[i] === -1) {
             const treeId = findNearest(positionX[i], positionY[i], 80, TRAIT_TREE);
             if (treeId !== -1) { targetEntityId[i] = treeId; actionTimer[i] = 200; }
-            else { state[i] = EntityState.Idle; actionTimer[i] = Math.floor(Math.random() * 60) + 10; }
+            else { state[i] = EntityState.Idle; actionTimer[i] = 30; }
           } else if (targetEntityId[i] === -1) { state[i] = EntityState.Idle; actionTimer[i] = 1; }
         } else if (nextState === EntityState.Combat) {
           if (canSearch && targetEntityId[i] === -1) {
             const targetId = findNearest(positionX[i], positionY[i], 80, ~TRAIT_TREE);
             if (targetId !== -1 && targetId !== i) { targetEntityId[i] = targetId; actionTimer[i] = 120; }
-            else { state[i] = EntityState.Idle; actionTimer[i] = Math.floor(Math.random() * 60) + 10; }
+            else { state[i] = EntityState.Idle; actionTimer[i] = 30; }
           } else if (targetEntityId[i] === -1) { state[i] = EntityState.Idle; actionTimer[i] = 1; }
-        } else { actionTimer[i] = Math.floor(Math.random() * 241) + 60; }
+        } else { actionTimer[i] = 120; }
         activeCommandPriority[i] = 0;
       } else {
-        if (state[i] === EntityState.Harvesting && targetEntityId[i] !== -1) { money[i] += 15; targetEntityId[i] = -1; }
-        state[i] = EntityState.Idle; actionTimer[i] = Math.floor(Math.random() * 60) + 10; activeCommandPriority[i] = 0;
+        state[i] = EntityState.Idle; actionTimer[i] = 30; activeCommandPriority[i] = 0;
       }
     }
   }
@@ -531,12 +633,37 @@ function AutonomySystem(): void {
 
 function IntelReportingSystem(): void {
   for (let i = 0; i < MAX_ENTITIES; i++) {
+    if (state[i] === EntityState.Dead) continue;
     if ((traitBitmask[i] & TRAIT_SCOUT) !== 0 && state[i] === EntityState.Idle) {
-      const enemyId = findNearest(positionX[i], positionY[i], 100, TRAIT_AGGRESSIVE);
+      const enemyId = findNearest(positionX[i], positionY[i], 150, TRAIT_AGGRESSIVE);
       if (enemyId !== -1) {
         const groupId = groupAffiliations[i * 8];
         if (groupId !== -1) {
-          groupTargetEntityId[groupId] = enemyId; groupTargetX[groupId] = positionX[enemyId]; groupTargetY[groupId] = positionY[enemyId]; groupTargetAge[groupId] = 0;
+          // Store Intel
+          carriedIntelEntityId[i] = enemyId;
+          carriedIntelX[i] = positionX[enemyId];
+          carriedIntelY[i] = positionY[enemyId];
+
+          // Check for Telepathic Burst
+          const wx = groupWarehouseX[groupId]; const wy = groupWarehouseY[groupId];
+          const dx = wx - positionX[i]; const dy = wy - positionY[i];
+          const inRange = (dx * dx + dy * dy < 400 * 400);
+          const groupCanReceive = groupMagicFrequency[groupId] === 1;
+
+          if ((traitBitmask[i] & TRAIT_MAGIC) !== 0 && mana[i] >= 50 && inRange && groupCanReceive) {
+            // Instant Commit
+            groupTargetEntityId[groupId] = enemyId;
+            groupTargetX[groupId] = positionX[enemyId];
+            groupTargetY[groupId] = positionY[enemyId];
+            groupTargetAge[groupId] = 0;
+            mana[i] -= 50;
+            carriedIntelEntityId[i] = -1;
+            // Visual Burst Signal
+            self.postMessage({ type: "MAGIC_BURST", payload: { fromX: positionX[i], fromY: positionY[i], toX: wx, toY: wy } });
+          } else {
+            // Physical Reporting
+            state[i] = EntityState.ReportingIntel;
+          }
         }
       }
     }
@@ -557,6 +684,7 @@ export function broadcastGroupCommand(groupId: number, commandState: number, tar
     groupTargetX[groupId] = targetX; groupTargetY[groupId] = targetY; groupTargetEntityId[groupId] = -2; groupTargetAge[groupId] = 0;
   }
   for (let i = 0; i < MAX_ENTITIES; i++) {
+    if ((traitBitmask[i] & TRAIT_TREE) !== 0) continue; // Trees ignore commands
     let issuingPriority = 0; let slotIdx = -1; const baseIdx = i * 8;
     for (let s = 0; s < 8; s++) { if (groupAffiliations[baseIdx + s] === groupId) { slotIdx = s; issuingPriority = 8 - s; break; } }
     if (issuingPriority > 0) {
@@ -569,50 +697,186 @@ export function broadcastGroupCommand(groupId: number, commandState: number, tar
 
 function CombatDamageSystem(attackerId: number, victimId: number, damageValue: number): void {
   health[victimId] -= damageValue; targetEntityId[victimId] = -1; actionTimer[victimId] = 0;
+  const groupA = groupAffiliations[attackerId * 8]; const groupB = groupAffiliations[victimId * 8];
+  if (groupA !== -1 && groupB !== -1 && groupA !== groupB) {
+    const idx = (groupB * MAX_GROUPS) + groupA;
+    groupRelationsMatrix[idx] = Math.max(-100, groupRelationsMatrix[idx] - 5);
+  }
   const baseIndex = victimId * 4;
-  pendingEvents[baseIndex] = EVENT_HOSTILE_ATTACK; pendingEvents[baseIndex + 1] = -1; pendingEvents[baseIndex + 2] = -1; pendingEvents[baseIndex + 3] = -1;
-  targetEntityId[victimId] = attackerId;
+  pendingEvents[baseIndex] = EVENT_HOSTILE_ATTACK; targetEntityId[victimId] = attackerId;
+}
+
+function TradeSystem(): void {
+  for (let gA = 0; gA < 50; gA++) { // Throttle to first 50 for performance
+    if (groupTotalWealth[gA] > 15000) {
+      for (let gB = 0; gB < 50; gB++) {
+        if (gA === gB) continue;
+        if (groupTotalWealth[gB] < 1000) {
+          const relation = groupRelationsMatrix[gA * MAX_GROUPS + gB];
+          if (relation >= 0) {
+            // Trigger Trade Contract
+            groupTotalWealth[gA] -= 2000;
+            let couriersDispatched = 0;
+            for (let i = 0; i < MAX_ENTITIES && couriersDispatched < 5; i++) {
+              if (state[i] === EntityState.Idle && groupAffiliations[i * 8] === gA) {
+                const dx = positionX[i] - groupWarehouseX[gA];
+                const dy = positionY[i] - groupWarehouseY[gA];
+                if (dx * dx + dy * dy < 10000) { // Near warehouse (100px)
+                  traitBitmask[i] |= TRAIT_COURIER;
+                  state[i] = EntityState.Trading;
+                  entityInventory[i] = 400;
+                  targetEntityId[i] = -1000 - gB; // Destination Leg
+                  couriersDispatched++;
+                }
+              }
+            }
+            break; // One contract per gA per check
+          }
+        }
+      }
+    }
+  }
 }
 
 function SteeringSystem(): void {
   for (let i = 0; i < MAX_ENTITIES; i++) {
     if ((traitBitmask[i] & TRAIT_TREE) !== 0) continue;
-    const targetId = targetEntityId[i];
-    if (targetId === -1) continue;
     
-    let tx: number, ty: number;
-    if (targetId === -2) {
-      // Flow Field Lookup (O(1))
-      const tileX = Math.floor(positionX[i] / TILE_SIZE);
-      const tileY = Math.floor(positionY[i] / TILE_SIZE);
-      const fieldIdx = Math.min(WORLD_MAP_COLS * WORLD_MAP_ROWS - 1, Math.max(0, tileY * WORLD_MAP_COLS + tileX)) * 2;
-      
-      const targetVectorX = globalFlowField[fieldIdx];
-      const targetVectorY = globalFlowField[fieldIdx + 1];
+    if (state[i] === EntityState.ReportingIntel) {
+      const gid = groupAffiliations[i * 8];
+      if (gid === -1) { state[i] = EntityState.Idle; continue; }
+      const wx = groupWarehouseX[gid]; const wy = groupWarehouseY[gid];
+      const dx = wx - positionX[i]; const dy = wy - positionY[i];
+      const distSq = dx * dx + dy * dy;
 
-      if (targetVectorX !== 0 || targetVectorY !== 0) {
-        velocityX[i] = targetVectorX * 1.5;
-        velocityY[i] = targetVectorY * 1.5;
+      if (distSq < 25.0) { // Arrival (5px)
+        // Commit Intel
+        const enemyId = carriedIntelEntityId[i];
+        if (enemyId !== -1) {
+          groupTargetEntityId[gid] = enemyId;
+          groupTargetX[gid] = carriedIntelX[i];
+          groupTargetY[gid] = carriedIntelY[i];
+          groupTargetAge[gid] = 0;
+          carriedIntelEntityId[i] = -1;
+        }
+        state[i] = EntityState.Idle; actionTimer[i] = 60;
+        continue;
+      }
+      const dist = Math.sqrt(distSq);
+      velocityX[i] = (dx / dist) * 1.8; velocityY[i] = (dy / dist) * 1.8;
+      continue;
+    }
+
+    if (state[i] === EntityState.ReturningToDepot) {
+      const gid = groupAffiliations[i * 8];
+      const validGid = (gid >= 0 && gid < MAX_GROUPS) ? gid : 0;
+      const wx = groupWarehouseX[validGid]; const wy = groupWarehouseY[validGid];
+      const dx = wx - positionX[i]; const dy = wy - positionY[i];
+      const distSq = dx * dx + dy * dy;
+      
+      if (distSq < 400.0) {
+        if (distSq < 1.0) {
+          groupTotalWealth[validGid] += entityInventory[i];
+          money[i] += 100;
+          entityInventory[i] = 0;
+          state[i] = EntityState.Idle; actionTimer[i] = 60;
+          velocityX[i] = (Math.random() - 0.5); velocityY[i] = (Math.random() - 0.5);
+          continue;
+        }
+        // Braking/Arrival Damping
+        const dist = Math.sqrt(distSq);
+        const damp = dist / 20.0;
+        velocityX[i] = (dx / dist) * 1.5 * damp;
+        velocityY[i] = (dy / dist) * 1.5 * damp;
         continue;
       } else {
-        // Fallback to coordinates if field is empty
-        const slot = activePrioritySlot[i]; 
-        const groupId = slot !== -1 ? groupAffiliations[i * 8 + slot] : -1;
+        const dist = Math.sqrt(distSq);
+        velocityX[i] = (dx / dist) * 1.5; velocityY[i] = (dy / dist) * 1.5;
+        continue;
+      }
+    }
+    const targetId = targetEntityId[i];
+    if (targetId === -1) continue;
+    let tx: number, ty: number;
+
+    // Phase 16: Courier Logic
+    if (state[i] === EntityState.Trading && (traitBitmask[i] & TRAIT_COURIER) !== 0) {
+      if (targetId <= -1000) {
+        let gTarget: number;
+        if (targetId <= -2000) gTarget = (-targetId) - 2000;
+        else gTarget = (-targetId) - 1000;
+        
+        tx = groupWarehouseX[gTarget]; ty = groupWarehouseY[gTarget];
+        const dx = tx - positionX[i]; const dy = ty - positionY[i]; const distSq = dx * dx + dy * dy;
+        
+        if (distSq < 25.0) {
+          if (entityInventory[i] > 0) {
+            groupTotalWealth[gTarget] += entityInventory[i];
+            entityInventory[i] = 0;
+            const myGid = groupAffiliations[i * 8];
+            if (myGid >= 0 && myGid < MAX_GROUPS) {
+              const relIdx = (gTarget * MAX_GROUPS) + myGid;
+              groupRelationsMatrix[relIdx] = Math.min(100, groupRelationsMatrix[relIdx] + 2);
+              targetEntityId[i] = -2000 - myGid;
+            }
+          } else {
+            state[i] = EntityState.Idle;
+            traitBitmask[i] &= ~TRAIT_COURIER;
+            targetEntityId[i] = -1;
+            actionTimer[i] = 60;
+          }
+          continue;
+        }
+        const dist = Math.sqrt(distSq);
+        velocityX[i] = (dx / dist) * 1.4; velocityY[i] = (dy / dist) * 1.4;
+        continue;
+      }
+    }
+
+    if (targetId === -2) {
+      const tileX = Math.floor(positionX[i] / TILE_SIZE); const tileY = Math.floor(positionY[i] / TILE_SIZE);
+      const fieldIdx = Math.min(WORLD_MAP_COLS * WORLD_MAP_ROWS - 1, Math.max(0, tileY * WORLD_MAP_COLS + tileX)) * 2;
+      const targetVectorX = globalFlowField[fieldIdx]; const targetVectorY = globalFlowField[fieldIdx + 1];
+      if (targetVectorX !== 0 || targetVectorY !== 0) {
+        velocityX[i] = targetVectorX * 1.5; velocityY[i] = targetVectorY * 1.5; continue;
+      } else {
+        const slot = activePrioritySlot[i]; const groupId = slot !== -1 ? groupAffiliations[i * 8 + slot] : -1;
         if (groupId !== -1) { tx = groupTargetX[groupId]; ty = groupTargetY[groupId]; } 
         else { targetEntityId[i] = -1; continue; }
       }
     } else { tx = positionX[targetId]; ty = positionY[targetId]; }
-    
     const dx = tx - positionX[i]; const dy = ty - positionY[i]; const distSq = dx * dx + dy * dy;
+    
     if (state[i] === EntityState.Fleeing) {
       const dist = Math.sqrt(distSq); if (dist > 0.1) { velocityX[i] = -(dx / dist) * 2.0; velocityY[i] = -(dy / dist) * 2.0; }
       if (distSq > 160000) targetEntityId[i] = -1;
     } else if (state[i] === EntityState.Combat) {
-      if (distSq > 4.0) { const dist = Math.sqrt(distSq); velocityX[i] = (dx / dist) * 1.5; velocityY[i] = (dy / dist) * 1.5; }
-      else { velocityX[i] = 0; velocityY[i] = 0; if (Math.random() > 0.9) CombatDamageSystem(i, targetId, 10); }
+      if (distSq > 400.0) { 
+        const dist = Math.sqrt(distSq); 
+        velocityX[i] = (dx / dist) * 1.5; 
+        velocityY[i] = (dy / dist) * 1.5; 
+      } else if (distSq > 4.0) {
+        const dist = Math.sqrt(distSq);
+        const damp = dist / 20.0;
+        velocityX[i] = (dx / dist) * 1.5 * damp;
+        velocityY[i] = (dy / dist) * 1.5 * damp;
+      } else { 
+        velocityX[i] = 0; velocityY[i] = 0; 
+        if (Math.random() > 0.9) CombatDamageSystem(i, targetId, 10); 
+      }
     } else {
-      if (distSq > 4.0) { const dist = Math.sqrt(distSq); velocityX[i] = (dx / dist) * 1.2; velocityY[i] = (dy / dist) * 1.2; }
-      else { velocityX[i] = 0; velocityY[i] = 0; }
+      if (distSq > 400.0) { 
+        const dist = Math.sqrt(distSq); 
+        velocityX[i] = (dx / dist) * 1.2; 
+        velocityY[i] = (dy / dist) * 1.2; 
+      } else if (distSq > 4.0) {
+        const dist = Math.sqrt(distSq);
+        const damp = dist / 20.0;
+        velocityX[i] = (dx / dist) * 1.2 * damp;
+        velocityY[i] = (dy / dist) * 1.2 * damp;
+      } else { 
+        velocityX[i] = 0; velocityY[i] = 0; 
+      }
     }
   }
 }
@@ -620,7 +884,7 @@ function SteeringSystem(): void {
 export function tick(): void {
   if (isPaused) return;
   SpatialUpdateSystem(); GroupKnowledgeDecaySystem(); IntelReportingSystem();
-  if (tickCount % 60 === 0) { SummarySystem(); RuleEvaluationSystem(); }
+  if (tickCount % 60 === 0) { SummarySystem(); RuleEvaluationSystem(); TradeSystem(); }
   LifeSystem(); AutonomySystem(); SteeringSystem(); MovementSystem(); tickCount++;
 }
 
@@ -635,7 +899,9 @@ self.onmessage = (e: MessageEvent) => {
       activeCommandPriority: activeCommandPriority.buffer, activePrioritySlot: activePrioritySlot.buffer,
       groupTargetEntityId: groupTargetEntityId.buffer, groupTargetX: groupTargetX.buffer, groupTargetY: groupTargetY.buffer, groupTargetAge: groupTargetAge.buffer,
       ruleRegistry: ruleRegistry.buffer, groupPopulationCount: groupPopulationCount.buffer, groupTotalWealth: groupTotalWealth.buffer,
-      worldMap: worldMap.buffer, globalFlowField: globalFlowField.buffer
+      worldMap: worldMap.buffer, globalFlowField: globalFlowField.buffer,
+      entityInventory: entityInventory.buffer, groupWarehouseX: groupWarehouseX.buffer, groupWarehouseY: groupWarehouseY.buffer,
+      groupRelationsMatrix: groupRelationsMatrix.buffer, groupVisualArchetypes: groupVisualArchetypes.buffer
     }});
   }
   if (type === "TICK") { tick(); self.postMessage({ type: "TICK_COMPLETE" }); }
