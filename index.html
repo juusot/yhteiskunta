@@ -5,7 +5,7 @@
     <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>High-Performance Simulation</title>
-    <script type="module" src="/src/main.ts" defer></script>
+    <script type="module" src="/src/main.tsx" defer></script>
     <style>
       body {
         font-family: system-ui, -apple-system, sans-serif;
@@ -87,6 +87,36 @@
     </style>
   </head>
   <body>
+    <div id="react-root"></div>
+    <div class="panel" id="inspector-panel" style="display: none;">
+      <h2>Entity Inspector</h2>
+      <div class="stats">
+        <div class="stat-box">
+          <div>Entity ID</div>
+          <div class="stat-value" id="inspect-id">-</div>
+        </div>
+        <div class="stat-box">
+          <div>Health</div>
+          <div class="stat-value" id="inspect-health">-</div>
+        </div>
+        <div class="stat-box">
+          <div>Wealth</div>
+          <div class="stat-value" id="inspect-money">-</div>
+        </div>
+        <div class="stat-box">
+          <div>State</div>
+          <div class="stat-value" id="inspect-state">-</div>
+        </div>
+      </div>
+      <div style="margin-top: 15px;">
+        <strong>Group Affiliations:</strong> <span id="inspect-groups">-</span>
+      </div>
+      <div style="margin-top: 10px;">
+        <button id="btn-follow-entity" class="secondary">Follow Entity</button>
+        <button id="btn-clear-inspector" class="danger">Clear Selection</button>
+      </div>
+    </div>
+
     <div class="panel">
       <h2>Simulation Performance</h2>
       <div class="stats">
@@ -102,6 +132,14 @@
           <div>Avg Tick Time</div>
           <div class="stat-value" id="stat-avg-tick">0 ms</div>
         </div>
+        <div class="stat-box">
+          <div>Min Tick (Window)</div>
+          <div class="stat-value" id="minTickDisplay">0 ms</div>
+        </div>
+        <div class="stat-box">
+          <div>Max Tick (Window)</div>
+          <div class="stat-value" id="maxTickDisplay">0 ms</div>
+        </div>
       </div>
     </div>
 
@@ -112,6 +150,14 @@
         <button id="btn-single-step" class="secondary">Single Step Tick</button>
         <button id="btn-nation-command" class="danger">Issue Nation Command</button>
         <button id="btn-army-command" class="danger">Issue Army Command</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Persistence</h2>
+      <div class="controls">
+        <button id="saveBtn">Save World</button>
+        <button id="loadBtn">Load World</button>
       </div>
     </div>
 
