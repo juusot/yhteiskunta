@@ -131,7 +131,7 @@ export const App: React.FC<AppProps> = ({
       for (let i = 0; i < maxEntities; i++) {
         if (S.state[i] === 5) continue;
         for (let slot = 0; slot < 8; slot++) {
-          if (S.groupAffiliations[i * 8 + slot] === selectedGroup.id) {
+          if (S.groupAffiliations[i * 10 + slot] === selectedGroup.id) {
             members.push({
               id: i,
               health: S.health[i] || 0,
@@ -145,7 +145,7 @@ export const App: React.FC<AppProps> = ({
               armor: S.charArmor?.[i] || 0,
               positionX: S.positionX?.[i] || 0,
               positionY: S.positionY?.[i] || 0,
-groups: Array.from(S.groupAffiliations.slice(i * 8, i * 8 + 8) as unknown as number[]).filter(g => g !== -1),
+groups: Array.from(S.groupAffiliations.slice(i * 10, i * 10 + 10) as unknown as number[]).filter(g => g !== -1),
               effectiveDamage: S.effectiveDamage?.[i] || 10,
               effectiveSpeed: S.effectiveSpeed?.[i] || 1,
               effectiveLifespan: S.effectiveLifespan?.[i] || 80
@@ -178,7 +178,7 @@ groups: Array.from(S.groupAffiliations.slice(i * 8, i * 8 + 8) as unknown as num
           armor: S.charArmor?.[i] || 0,
           positionX: S.positionX?.[i] || 0,
           positionY: S.positionY?.[i] || 0,
-groups: Array.from(S.groupAffiliations.slice(i * 8, i * 8 + 8) as unknown as number[]).filter(g => g !== -1),
+groups: Array.from(S.groupAffiliations.slice(i * 10, i * 10 + 10) as unknown as number[]).filter(g => g !== -1),
             effectiveDamage: S.effectiveDamage?.[i] || 10,
           effectiveSpeed: S.effectiveSpeed?.[i] || 1,
           effectiveLifespan: S.effectiveLifespan?.[i] || 80
@@ -861,7 +861,7 @@ const RulesTab: React.FC<{ ruleRegistry: Int32Array | null; logicBytecode: Int32
     if (!ruleRegistry || !logicBytecode) return;
     const newRules = [];
     for (let i = 0; i < 20; i++) {
-      const base = i * 8;
+      const base = i * 10;
       const nodes: any[] = [];
       if (ruleRegistry[base + 2] === 255) {
         const lBase = i * 32;

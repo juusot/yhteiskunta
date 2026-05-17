@@ -69,6 +69,9 @@ export let groupRelationsMatrix: Int8Array;
 // Phase 14: Visual Archetypes
 export let groupVisualArchetypes: Int8Array;
 
+// Phase 23: National Cohesion (0-100, <30 = Anarchy)
+export let groupCohesion: Int32Array;
+
 // Phase 17: Group Magic
 export let groupMagicFrequency: Int8Array;
 
@@ -178,7 +181,8 @@ export function initializeState(): void {
   effectiveLifespan = new Int16Array(new SharedArrayBuffer(C.MAX_ENTITIES * 2));
   effectiveDamage = new Int16Array(new SharedArrayBuffer(C.MAX_ENTITIES * 2));
   effectiveSpeed = new Float32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
-  groupAffiliations = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * C.GROUP_SLOTS_PER_CHARACTER * 4));
+  groupAffiliations = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * C.MAX_GROUP_CHANNELS * 4));
+  groupCohesion = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   activeCommandPriority = new Uint8Array(new SharedArrayBuffer(C.MAX_ENTITIES * 1));
   activePrioritySlot = new Int8Array(new SharedArrayBuffer(C.MAX_ENTITIES * 1));
   groupTargetEntityId = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
@@ -275,6 +279,7 @@ export function mapStateBuffers(buffers: any): void {
   groupWarehouseY = new Float32Array(buffers.groupWarehouseY);
   groupRelationsMatrix = new Int8Array(buffers.groupRelationsMatrix);
   groupVisualArchetypes = new Int8Array(buffers.groupVisualArchetypes);
+  groupCohesion = new Int32Array(buffers.groupCohesion);
   groupNames = new Map<number, string>();
   carriedIntelEntityId = new Int32Array(buffers.carriedIntelEntityId);
   carriedIntelX = new Float32Array(buffers.carriedIntelX);

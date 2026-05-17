@@ -62,6 +62,7 @@ export enum EntityState {
   Trading = 6,
   ReportingIntel = 7,
   Construction = 8,
+  Sabotaging = 9,  // Phase 23: Spy sabotage state
 }
 
 export enum BuildingType {
@@ -95,6 +96,24 @@ export const MAX_BYTECODE_PER_RULE = 32;
 // Phase 21: Group & Character Limits
 export const GROUP_SLOTS_PER_CHARACTER = 8;
 export const EVENT_SLOTS_PER_CHARACTER = 8;
+
+// Phase 23: Extended Group Channels (10 slots: 0-7 Public, 8-9 Secret)
+export const MAX_GROUP_CHANNELS = 10;
+export const PUBLIC_GROUP_SLOTS = 8;
+export const SECRET_GROUP_SLOTS = 2;
+
+// Phase 23: National Cohesion Thresholds
+export const COHESION_MAX = 100;
+export const COHESION_ANARCHY_THRESHOLD = 30;
+export const COHESION_WEALTHY_THRESHOLD = 10000;
+export const COHESION_DECAY_RATE = 5;
+export const COHESION_GROWTH_RATE = 1;
+
+// Phase 23: Spy Sabotage Constants
+export const SPY_SABOTAGE_RANGE = 5;  // 5-unit radius (squared = 25)
+export const SPY_WEALTH_DRAIN = 500;
+export const SPY_TRUST_DECAY = 10;
+export const SPY_SABOTAGE_INTERVAL = 60;  // Every 60 frames
 
 // Phase 22: Building Influence Radii (units)
 export const INFLUENCE_RADIUS_WAREHOUSE = 200;

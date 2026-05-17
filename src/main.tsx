@@ -674,7 +674,7 @@ window.addEventListener('DOMContentLoaded', () => {
         }
 
         if (type === "ENTITY_FOUND") { inspectEntityId = payload.id; }
-        if (type === "MAGIC_BURST") { addChronicle(`Magic Burst from Group ${groupAffiliations[payload.entityId * 8] || '?'}`); }
+        if (type === "MAGIC_BURST") { addChronicle(`Magic Burst from Group ${groupAffiliations[payload.entityId * 10] || '?'}`); }
         if (type === "SAVE_REQUEST") handleSave();
         if (type === "GROUP_CREATED") {
           // Force React to re-render by updating tickCount (triggers stats refresh)

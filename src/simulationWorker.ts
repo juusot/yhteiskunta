@@ -94,6 +94,7 @@ self.onmessage = (e: MessageEvent) => {
           groupMagicFrequency: S.groupMagicFrequency.buffer,
           groupRelationsMatrix: S.groupRelationsMatrix.buffer,
           groupVisualArchetypes: S.groupVisualArchetypes.buffer,
+          groupCohesion: S.groupCohesion.buffer,
           ruleRegistry: S.ruleRegistry.buffer,
           logicBytecode: S.logicBytecode.buffer,
           workerSync: S.workerSync.buffer,

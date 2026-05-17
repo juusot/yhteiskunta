@@ -94,7 +94,7 @@ export function LifeSystem(): void {
       const tx = Math.floor(S.positionX[i] / C.TILE_SIZE), ty = Math.floor(S.positionY[i] / C.TILE_SIZE);
       if (tx >= 0 && tx < C.WORLD_MAP_COLS && ty >= 0 && ty < C.WORLD_MAP_ROWS) {
         const owner = S.territoryOwnerMap[ty * C.WORLD_MAP_COLS + tx];
-        const gid = S.groupAffiliations[i * 8];
+        const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS];
         if (owner !== -1 && owner !== gid) {
            const rel = S.groupRelationsMatrix[gid * C.MAX_GROUPS + owner];
            if (rel < -50) S.health[i] -= 2;
@@ -271,8 +271,8 @@ export function AutonomySystem(): void {
     if (S.positionY[i] === S.maxY && S.maxY < C.WORLD_HEIGHT) continue;
 
     // === PRIORITY 1: SURVIVAL ===
-    // Check if character's group needs food urgently
-    const gid = S.groupAffiliations[i * 8];
+    // Check if character's group needs food urgently (use public slot 0)
+    const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS + 0];
     let survivalTask: number = -1; // -1=none, 0=bush, 1=field
     
     if (gid >= 0 && gid < C.MAX_GROUPS) {
@@ -361,8 +361,8 @@ export function AutonomySystem(): void {
     // === PRIORITY 3: GROUP COMMANDS ===
     S.activePrioritySlot[i] = -1;
     
-    // Check for pending events (attacks)
-    const nextEvent = S.pendingEvents[i * 4];
+    // Phase 23: Check for pending events (attacks) - use 4 event slots
+    const nextEvent = S.pendingEvents[i * C.EVENT_SLOTS_PER_CHARACTER];
     if (nextEvent !== -1) {
       U.popNextEvent(i);
       if (nextEvent === C.EVENT_HOSTILE_ATTACK) {
@@ -377,22 +377,82 @@ export function AutonomySystem(): void {
       }
     }
     
-    // Check group target commands (from rules/leaders)
-    const baseIdx = i * 8;
-    for (let s = 0; s < 8; s++) {
+    // Phase 23: Check group target commands across all 10 slots (0-7 public, 8-9 secret)
+    // ENFORCER RULE: If any group has wartime target, immediately select it and break
+    const baseIdx = i * C.MAX_GROUP_CHANNELS;
+    let wartimeGroupFound = -1;
+    
+    // First pass: check for wartime targets (war overrides everything)
+    for (let s = 0; s < C.MAX_GROUP_CHANNELS; s++) {
       const groupId = S.groupAffiliations[baseIdx + s];
-      if (groupId !== -1) {
-        const targetId = S.groupTargetEntityId[groupId];
-        if (targetId !== -1) {
-          S.targetEntityId[i] = targetId;
+      if (groupId !== -1 && groupId >= 0 && groupId < C.MAX_GROUPS) {
+        if (S.groupTargetEntityId[groupId] !== -1) {
+          // Wartime override: International conflict cleanly overrides family activities
+          S.targetEntityId[i] = S.groupTargetEntityId[groupId];
           S.state[i] = C.EntityState.Combat;
           S.actionTimer[i] = 300;
           S.activePrioritySlot[i] = s;
-          continue;
+          wartimeGroupFound = groupId;
+          break;
         }
       }
     }
-    if (S.state[i] === C.EntityState.Combat) continue;
+    
+    // If no wartime target found, check for normal commands (skip wartime groups)
+    if (wartimeGroupFound === -1) {
+      for (let s = 0; s < C.MAX_GROUP_CHANNELS; s++) {
+        const groupId = S.groupAffiliations[baseIdx + s];
+        if (groupId !== -1 && groupId >= 0 && groupId < C.MAX_GROUPS) {
+          // Skip groups that are in wartime (already handled above)
+          if (S.groupTargetEntityId[groupId] !== -1 && wartimeGroupFound === -1) {
+            S.targetEntityId[i] = S.groupTargetEntityId[groupId];
+            S.state[i] = C.EntityState.Combat;
+            S.actionTimer[i] = 300;
+            S.activePrioritySlot[i] = s;
+          }
+        }
+      }
+    }
+    
+    // Phase 23: SPY SABOTAGE BEHAVIOR
+    // If entity has a valid hidden enemy faction in secret slot 8
+    const secretSlotGroup = S.groupAffiliations[baseIdx + 8];
+    if (secretSlotGroup !== -1 && S.state[i] !== C.EntityState.Combat) {
+      // Check if they should be sabotaging (ordered to do so)
+      // For now, spies in secret slot attempt sabotage when idle
+      const publicSlot0Group = S.groupAffiliations[baseIdx + 0];
+      if (publicSlot0Group !== -1 && publicSlot0Group >= 0) {
+        // Navigate to the public nation's warehouse
+        const warehouseX = S.groupWarehouseX[publicSlot0Group];
+        const warehouseY = S.groupWarehouseY[publicSlot0Group];
+        
+        const dx = S.positionX[i] - warehouseX;
+        const dy = S.positionY[i] - warehouseY;
+        const distSq = dx * dx + dy * dy;
+        
+        // If within sabotage range, perform sabotage actions
+        if (distSq < C.SPY_SABOTAGE_RANGE * C.SPY_SABOTAGE_RANGE) {
+          if (S.tickCount % C.SPY_SABOTAGE_INTERVAL === 0) {
+            // Drain faction wealth
+            S.groupTotalWealth[publicSlot0Group] = Math.max(0, S.groupTotalWealth[publicSlot0Group] - C.SPY_WEALTH_DRAIN);
+            
+            // Find a random local sub-group (slot 1-4) to erode trust with
+            const familyGroup = S.groupAffiliations[baseIdx + 1];
+            if (familyGroup !== -1 && familyGroup >= 0) {
+              // Erode internal trust between public nation and family
+              const trustIdx = publicSlot0Group * C.MAX_GROUPS + familyGroup;
+              S.groupRelationsMatrix[trustIdx] = Math.max(-100, S.groupRelationsMatrix[trustIdx] - C.SPY_TRUST_DECAY);
+            }
+          }
+          
+          // Set state to sabotaging
+          S.state[i] = C.EntityState.Sabotaging;
+          S.actionTimer[i] = 600; // Continue sabotaging for a while
+        }
+      }
+    }
+    
+    if (S.state[i] === C.EntityState.Combat || S.state[i] === C.EntityState.Sabotaging) continue;
 
     // === PRIORITY 4: BUILDING (if needed) ===
     // Characters can build Houses and Fields when conditions are met
@@ -475,7 +535,7 @@ export function SteeringSystem(): void {
       
       // Control vehicle based on character's goals
       // For now, vehicles just wander or follow group targets
-      const gid = S.groupAffiliations[i * 8];
+      const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS];
       if (gid !== -1 && S.groupTargetEntityId[gid] !== -1) {
          const dx = S.groupTargetX[gid] - S.vehPositionX[vId];
          const dy = S.groupTargetY[gid] - S.vehPositionY[vId];
@@ -508,7 +568,7 @@ export function SteeringSystem(): void {
     }
 
     if (S.state[i] === C.EntityState.ReportingIntel) {
-      const gid = S.groupAffiliations[i * 8];
+      const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS];
       if (gid === -1) { S.state[i] = C.EntityState.Idle; continue; }
       const wx = S.groupWarehouseX[gid]; const wy = S.groupWarehouseY[gid];
       const dx = wx - S.positionX[i]; const dy = wy - S.positionY[i];
@@ -536,7 +596,7 @@ export function SteeringSystem(): void {
       
       if (distSq < 16.0) { 
         if (S.state[i] === C.EntityState.ReturningToDepot) {
-          const gid = S.groupAffiliations[i * 8];
+          const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS];
           const invSlot = S.charTool[i]; // 0=wood, 1=gold, 2=food, 3=misc
           Atomics.add(S.groupTotalWealth, gid, S.entityInventory[i]);
           Atomics.add(S.bldInventory, bldId * 4 + invSlot, S.entityInventory[i]);
@@ -555,7 +615,7 @@ export function SteeringSystem(): void {
       continue;
     }
     if (targetId === -1) { 
-      const gid = S.groupAffiliations[i * 8];
+      const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS];
       if (gid >= 0 && gid < C.MAX_GROUPS) {
         const wx = S.groupWarehouseX[gid]; const wy = S.groupWarehouseY[gid];
         const dx = wx - S.positionX[i]; const dy = wy - S.positionY[i];
@@ -593,7 +653,7 @@ export function SteeringSystem(): void {
         if (distSq < 25.0) {
           if (S.entityInventory[i] > 0) {
             S.groupTotalWealth[gTarget] += S.entityInventory[i]; S.entityInventory[i] = 0;
-            const myGid = S.groupAffiliations[i * 8];
+            const myGid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS];
             if (myGid >= 0 && myGid < C.MAX_GROUPS) {
               const relIdx = (gTarget * C.MAX_GROUPS) + myGid;
               S.groupRelationsMatrix[relIdx] = Math.min(100, S.groupRelationsMatrix[relIdx] + 2);
@@ -618,7 +678,7 @@ export function SteeringSystem(): void {
       if (targetVectorX !== 0 || targetVectorY !== 0) {
         S.velocityX[i] = targetVectorX * 1.5; S.velocityY[i] = targetVectorY * 1.5; continue;
       } else {
-        const slot = S.activePrioritySlot[i]; const groupId = slot !== -1 ? S.groupAffiliations[i * 8 + slot] : -1;
+        const slot = S.activePrioritySlot[i]; const groupId = slot !== -1 ? S.groupAffiliations[i * C.MAX_GROUP_CHANNELS + slot] : -1;
         if (groupId !== -1) { tx = S.groupTargetX[groupId]; ty = S.groupTargetY[groupId]; } 
         else { S.targetEntityId[i] = -1; continue; }
       }
@@ -638,7 +698,7 @@ export function SteeringSystem(): void {
       
       if (isFieldHarvest) {
         // Harvesting from Field building
-        const gid = S.groupAffiliations[i * 8];
+        const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS];
         const bx = S.bldPositionX[fieldBldId];
         const by = S.bldPositionY[fieldBldId];
         const bdx = bx - S.positionX[i];
@@ -693,7 +753,7 @@ export function SteeringSystem(): void {
                S.health[targetId] -= 20; S.entityInventory[i] += 10;
                if (S.entityInventory[i] >= 100) {
                  S.state[i] = C.EntityState.ReturningToDepot; S.targetEntityId[i] = -1;
-                 const gid = S.groupAffiliations[i * 8];
+                 const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS];
                  S.targetBuildingId[i] = U.findNearestOwnedBuilding(S.positionX[i], S.positionY[i], 2000, C.BuildingType.Warehouse, gid);
                }
             }
@@ -737,7 +797,7 @@ export function IntelReportingSystem(): void {
     if ((S.traitBitmask[i] & C.TRAIT_SCOUT) !== 0 && S.state[i] === C.EntityState.Idle) {
       const enemyId = U.findNearest(S.positionX[i], S.positionY[i], 150, C.TRAIT_AGGRESSIVE);
       if (enemyId !== -1) {
-        const groupId = S.groupAffiliations[i * 8];
+        const groupId = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS];
         if (groupId !== -1) {
           S.carriedIntelEntityId[i] = enemyId; S.carriedIntelX[i] = S.positionX[enemyId]; S.carriedIntelY[i] = S.positionY[enemyId];
           const wx = S.groupWarehouseX[groupId]; const wy = S.groupWarehouseY[groupId];

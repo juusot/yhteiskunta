@@ -16,13 +16,45 @@ export function SummarySystem(): void {
   S.groupMisc.fill(0);
   let totalActive = 0;
 
+  // Phase 23: National Cohesion System
+  // Update cohesion for all active groups
+  for (let g = 0; g < C.MAX_GROUPS; g++) {
+    const pop = S.groupPopulationCount[g];
+    if (pop === 0) continue;
+    
+    const wealth = S.groupTotalWealth[g];
+    
+    // Wealth-based cohesion changes
+    if (wealth > C.COHESION_WEALTHY_THRESHOLD) {
+      // Prosperity increases cohesion
+      S.groupCohesion[g] = Math.min(C.COHESION_MAX, S.groupCohesion[g] + C.COHESION_GROWTH_RATE);
+    } else if (wealth <= 0) {
+      // Collapse decreases cohesion rapidly
+      S.groupCohesion[g] = Math.max(0, S.groupCohesion[g] - C.COHESION_DECAY_RATE);
+    }
+    
+    // ANARCHY TRIGGER: If cohesion falls below threshold, restructure the group hierarchy
+    if (S.groupCohesion[g] < C.COHESION_ANARCHY_THRESHOLD && S.tickCount % C.TICKS_PER_DAY === 0) {
+      triggerAnarchy(g);
+    }
+  }
+
+  // Count population - use 10 slots per entity (0-7 public, 8-9 secret)
   for (let i = 0; i < C.MAX_ENTITIES; i++) {
     if (S.state[i] !== C.EntityState.Dead) {
-      const gid = S.groupAffiliations[i * 8];
-      if (gid >= 0 && gid < C.MAX_GROUPS) {
-        S.groupPopulationCount[gid]++;
-        S.groupTotalWealth[gid] += S.money[i];
-        S.groupGold[gid] += S.money[i]; // Money is counted as Gold
+      // Count only public slots (0-7) for demographics
+      const baseIdx = i * C.MAX_GROUP_CHANNELS;
+      let hasPublicAffiliation = false;
+      for (let s = 0; s < C.PUBLIC_GROUP_SLOTS; s++) {
+        const gid = S.groupAffiliations[baseIdx + s];
+        if (gid >= 0 && gid < C.MAX_GROUPS) {
+          S.groupPopulationCount[gid]++;
+          hasPublicAffiliation = true;
+        }
+      }
+      if (hasPublicAffiliation) {
+        S.groupTotalWealth[i] += S.money[i];
+        S.groupGold[i] += S.money[i];
         totalActive++;
       }
     }
@@ -95,7 +127,12 @@ export function SummarySystem(): void {
         S.positionY[i] = S.groupWarehouseY[g] + (Math.random() - 0.5) * 50;
         S.velocityX[i] = (Math.random() - 0.5);
         S.velocityY[i] = (Math.random() - 0.5);
-        S.groupAffiliations[i * 8] = g;
+        // Phase 23: Assign to public slot 0
+        S.groupAffiliations[i * C.MAX_GROUP_CHANNELS + 0] = g;
+        // Clear remaining slots
+        for (let s = 1; s < C.MAX_GROUP_CHANNELS; s++) {
+          S.groupAffiliations[i * C.MAX_GROUP_CHANNELS + s] = -1;
+        }
         S.targetEntityId[i] = -1;
         S.entityInventory[i] = 0;
         S.actionTimer[i] = 60;
@@ -110,7 +147,7 @@ export function SummarySystem(): void {
   // Starvation damage pass
   for (let i = 0; i < C.MAX_ENTITIES; i++) {
     if (S.state[i] === C.EntityState.Dead) continue;
-    const gid = S.groupAffiliations[i * 8];
+    const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS + 0]; // Check slot 0
     if (gid >= 0 && gid < C.MAX_GROUPS && starvingGroups[gid] === 1) {
       S.health[i] -= 10; // Fast death if group is broke
     }
@@ -328,7 +365,7 @@ export function TradeSystem(): void {
             S.groupTotalWealth[gA] -= 2000;
             let couriersDispatched = 0;
             for (let i = 0; i < C.MAX_ENTITIES && couriersDispatched < 5; i++) {
-              if (S.state[i] === C.EntityState.Idle && S.groupAffiliations[i * 8] === gA) {
+              if (S.state[i] === C.EntityState.Idle && S.groupAffiliations[i * C.MAX_GROUP_CHANNELS + 0] === gA) {
                 const dx = S.positionX[i] - S.groupWarehouseX[gA];
                 const dy = S.positionY[i] - S.groupWarehouseY[gA];
                 if (dx * dx + dy * dy < 10000) {
@@ -488,5 +525,33 @@ export function BuffSystem(): void {
   // This is the "slow update cycle" - not every tick, just daily
   for (const entityId of B.activeBuffs.keys()) {
     B.recalculateEffectiveStats(entityId);
+  }
+}
+
+/**
+ * Phase 23: ANARCHY TRIGGER
+ * When a group's cohesion falls below threshold, demote the nation in priority
+ * and promote family/clan to slot 0, effectively breaking centralized control
+ */
+function triggerAnarchy(governingGroupId: number): void {
+  // Scan all entities that have this group in their PUBLIC slot 0
+  for (let i = 0; i < C.MAX_ENTITIES; i++) {
+    if (S.state[i] === C.EntityState.Dead) continue;
+    
+    const baseIdx = i * C.MAX_GROUP_CHANNELS;
+    const slot0Group = S.groupAffiliations[baseIdx + 0];
+    
+    // If this entity's top slot is the collapsing nation
+    if (slot0Group === governingGroupId) {
+      // Check if they have a family/clan in slot 1 to promote
+      const slot1Group = S.groupAffiliations[baseIdx + 1];
+      
+      if (slot1Group !== -1 && slot1Group !== governingGroupId) {
+        // Demote nation to slot 5, promote family to slot 0
+        S.groupAffiliations[baseIdx + 0] = slot1Group;  // Promote
+        S.groupAffiliations[baseIdx + 1] = governingGroupId; // Demote
+        S.groupAffiliations[baseIdx + 5] = governingGroupId; // Ensure at bottom
+      }
+    }
   }
 }
