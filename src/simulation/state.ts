@@ -111,6 +111,7 @@ export let bldPositionY: Float32Array;
 export let bldType: Uint8Array;
 export let bldHealth: Int32Array;
 export let bldOwnerGroup: Int32Array;
+export let bldTier: Uint8Array;
 export let bldDataA: Int32Array; // Stride: MAX_BUILDINGS
 export let bldDataB: Int32Array; // Stride: MAX_BUILDINGS
 export let bldDataC: Int32Array; // Stride: MAX_BUILDINGS
@@ -135,6 +136,13 @@ export let itemInstanceOwnerType: Uint8Array; // Size: MAX_ITEM_INSTANCES (Inact
 export let itemInstanceOwnerId: Int32Array;   // Size: MAX_ITEM_INSTANCES (Entity ID or Group ID owner index)
 export let itemInstanceX: Float32Array;       // Size: MAX_ITEM_INSTANCES (World position on ground)
 export let itemInstanceY: Float32Array;       // Size: MAX_ITEM_INSTANCES (World position on ground)
+
+// Phase 25: Player Interaction
+export let playerTargetX: Float32Array; // Size: C.MAX_ENTITIES * 4 bytes
+export let playerTargetY: Float32Array; // Size: C.MAX_ENTITIES * 4 bytes
+
+// Phase 25: Player Interaction & Scenario
+export let scenarioState: Int32Array; // 0: allowedGroupId, 1: targetMetric, 2: targetValue, 3: targetGroupId
 
 export let quadrantIndex: number = -1;
 export let minX = 0, maxX = 1600, minY = 0, maxY = 1200;
@@ -262,6 +270,18 @@ export function initializeState(): void {
   itemInstanceX = new Float32Array(new SharedArrayBuffer(C.MAX_ITEM_INSTANCES * 4));
   itemInstanceY = new Float32Array(new SharedArrayBuffer(C.MAX_ITEM_INSTANCES * 4));
 
+  // Player Interaction
+  playerTargetX = new Float32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
+  playerTargetX.fill(-1.0);
+  playerTargetY = new Float32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
+  playerTargetY.fill(-1.0);
+
+  scenarioState = new Int32Array(new SharedArrayBuffer(16));
+  scenarioState[0] = -1; // allowedGroupId
+  scenarioState[1] = 0;  // targetMetric
+  scenarioState[2] = 0;  // targetValue
+  scenarioState[3] = -1; // targetGroupId
+
   initializeLocalState();
 }
 
@@ -331,6 +351,7 @@ export function mapStateBuffers(buffers: any): void {
   bldType = new Uint8Array(buffers.bldType);
   bldHealth = new Int32Array(buffers.bldHealth);
   bldOwnerGroup = new Int32Array(buffers.bldOwnerGroup);
+  bldTier = new Uint8Array(buffers.bldTier);
   bldDataA = new Int32Array(buffers.bldDataA);
   bldDataB = new Int32Array(buffers.bldDataB);
   bldDataC = new Int32Array(buffers.bldDataC);
@@ -344,6 +365,22 @@ export function mapStateBuffers(buffers: any): void {
   vehHealth = new Int32Array(buffers.vehHealth);
   vehPilotId = new Int32Array(buffers.vehPilotId);
   vehOwnerGroup = new Int32Array(buffers.vehOwnerGroup);
+
+  itemDefBaseType = new Uint8Array(buffers.itemDefBaseType);
+  itemDefStatA = new Int32Array(buffers.itemDefStatA);
+  itemDefStatB = new Int32Array(buffers.itemDefStatB);
+  itemDefTraitMask = new Uint32Array(buffers.itemDefTraitMask);
+
+  itemInstanceDefId = new Uint16Array(buffers.itemInstanceDefId);
+  itemInstanceOwnerType = new Uint8Array(buffers.itemInstanceOwnerType);
+  itemInstanceOwnerId = new Int32Array(buffers.itemInstanceOwnerId);
+  itemInstanceX = new Float32Array(buffers.itemInstanceX);
+  itemInstanceY = new Float32Array(buffers.itemInstanceY);
+
+  playerTargetX = new Float32Array(buffers.playerTargetX);
+  playerTargetY = new Float32Array(buffers.playerTargetY);
+
+  scenarioState = new Int32Array(buffers.scenarioState);
 
   initializeLocalState();
 }

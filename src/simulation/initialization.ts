@@ -46,7 +46,7 @@ export function initializeWorld(): void {
 
   // Reset Buildings
   for (let i = 0; i < C.MAX_BUILDINGS; i++) {
-    S.bldType[i] = 0; S.bldHealth[i] = 0; S.bldOwnerGroup[i] = -1;
+    S.bldType[i] = 0; S.bldHealth[i] = 0; S.bldOwnerGroup[i] = -1; S.bldTier[i] = 0;
     S.bldDataA[i] = 0;
     S.bldDataB[i] = 0;
     S.bldDataC[i] = 0;
@@ -117,9 +117,10 @@ export function initializeWorld(): void {
     S.bldType[g] = C.BuildingType.Warehouse;
     S.bldHealth[g] = 1000;
     S.bldOwnerGroup[g] = g;
-    S.bldDataA[g] = 5000;
-    S.bldDataB[g] = 5000;
-    S.bldDataC[g] = 0;
+    S.bldTier[g] = C.BLD_TIER_1;
+    S.bldDataA[g] = 500;  // Wood
+    S.bldDataB[g] = 500;  // Gold
+    S.bldDataC[g] = 1000; // Food
   }
 
   generateBiomes();

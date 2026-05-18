@@ -76,12 +76,28 @@ export enum BuildingType {
   Field = 5,
 }
 
+// Architectural Tiers
+export const BLD_TIER_1 = 1;
+export const BLD_TIER_2 = 2;
+export const BLD_TIER_3 = 3;
+
+// Tier Upgrade Costs
+export const UPGRADE_TIER2_WOOD = 500;
+export const UPGRADE_TIER2_GOLD = 200;
+export const UPGRADE_TIER3_WOOD = 1500;
+export const UPGRADE_TIER3_GOLD = 800;
+
 export enum VehicleType {
   None = 0,
   Cart = 1,
   Boat = 2,
   Helicopter = 3,
 }
+
+export const VEHICLE_WAGON = 1;
+export const VEHICLE_SHIP = 2;
+export const MAX_PASSENGERS_WAGON = 6;
+export const MAX_PASSENGERS_SHIP = 30;
 
 // Item Owner Types
 export const OWNER_TYPE_INACTIVE = 0;

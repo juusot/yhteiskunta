@@ -264,6 +264,25 @@ export function MovementSystem(): void {
     for (let v = 0; v < C.MAX_VEHICLES; v++) {
       if (S.vehType[v] === 0 || S.vehHealth[v] <= 0) continue;
       
+      const nextX = S.vehPositionX[v] + S.vehVelocityX[v];
+      const nextY = S.vehPositionY[v] + S.vehVelocityY[v];
+
+      const tileX = Math.max(0, Math.min(C.WORLD_MAP_COLS - 1, Math.floor(nextX / C.TILE_SIZE)));
+      const tileY = Math.max(0, Math.min(C.WORLD_MAP_ROWS - 1, Math.floor(nextY / C.TILE_SIZE)));
+      const terrain = S.worldMap[tileY * C.WORLD_MAP_COLS + tileX];
+
+      if (S.vehType[v] === C.VEHICLE_SHIP) {
+        if (terrain !== C.TerrainType.Water) {
+          S.vehVelocityX[v] = 0;
+          S.vehVelocityY[v] = 0;
+        }
+      } else if (S.vehType[v] === C.VEHICLE_WAGON) {
+        if (terrain === C.TerrainType.Water || terrain === C.TerrainType.Mountain) {
+          S.vehVelocityX[v] = 0;
+          S.vehVelocityY[v] = 0;
+        }
+      }
+
       S.vehPositionX[v] += S.vehVelocityX[v];
       S.vehPositionY[v] += S.vehVelocityY[v];
 
@@ -283,6 +302,8 @@ export function AutonomySystem(): void {
     if (S.positionX[i] === S.maxX && S.maxX < C.WORLD_WIDTH) continue;
     if (S.positionY[i] < S.minY || S.positionY[i] > S.maxY) continue;
     if (S.positionY[i] === S.maxY && S.maxY < C.WORLD_HEIGHT) continue;
+
+    if (S.targetEntityId[i] === -3) continue; // Manual command override
 
     // === PRIORITY 1: SURVIVAL ===
     // Check if character's group needs food urgently (use public slot 0)
@@ -503,6 +524,10 @@ export function AutonomySystem(): void {
                 S.bldPositionY[b] = buildY;
                 S.bldHealth[b] = 50;
                 S.bldOwnerGroup[b] = gid;
+                S.bldTier[b] = C.BLD_TIER_1;
+                S.bldDataA[b] = 0;
+                S.bldDataB[b] = 0;
+                S.bldDataC[b] = 0;
                 S.targetBuildingId[i] = b;
                 S.state[i] = C.EntityState.Construction;
                 S.actionTimer[i] = 120;
@@ -542,24 +567,44 @@ export function SteeringSystem(): void {
 
     const targetId = S.targetEntityId[i];
 
+    if (targetId === -3) {
+      const tx = S.playerTargetX[i], ty = S.playerTargetY[i];
+      const dx = tx - S.positionX[i], dy = ty - S.positionY[i];
+      const distSq = dx * dx + dy * dy;
+      if (distSq > 4.0) {
+        const dist = Math.sqrt(distSq);
+        const speed = S.effectiveSpeed[i] || 1.0;
+        S.velocityX[i] = (dx / dist) * speed * 2.0;
+        S.velocityY[i] = (dy / dist) * speed * 2.0;
+      } else {
+        S.velocityX[i] = 0; S.velocityY[i] = 0;
+        S.targetEntityId[i] = -1;
+      }
+      continue;
+    }
+
     // Vehicle Steering
     if (S.isMounted[i] === 1) {
       const vId = S.targetVehicleId[i];
       if (vId === -1 || S.vehHealth[vId] <= 0) { S.isMounted[i] = 0; S.targetVehicleId[i] = -1; continue; }
       
-      // Control vehicle based on character's goals
-      // For now, vehicles just wander or follow group targets
-      const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS];
-      if (gid !== -1 && S.groupTargetEntityId[gid] !== -1) {
-         const dx = S.groupTargetX[gid] - S.vehPositionX[vId];
-         const dy = S.groupTargetY[gid] - S.vehPositionY[vId];
-         const dist = Math.sqrt(dx*dx + dy*dy);
-         if (dist > 1.0) { S.vehVelocityX[vId] = (dx/dist) * 2.5; S.vehVelocityY[vId] = (dy/dist) * 2.5; }
+      if (S.vehPilotId[vId] !== i) {
+        S.velocityX[i] = 0; S.velocityY[i] = 0;
       } else {
-         if (S.tickCount % 120 === 0) {
-            S.vehVelocityX[vId] = (Math.random() - 0.5) * 2;
-            S.vehVelocityY[vId] = (Math.random() - 0.5) * 2;
-         }
+        // Control vehicle based on character's goals
+        // For now, vehicles just wander or follow group targets
+        const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS];
+        if (gid !== -1 && S.groupTargetEntityId[gid] !== -1) {
+           const dx = S.groupTargetX[gid] - S.vehPositionX[vId];
+           const dy = S.groupTargetY[gid] - S.vehPositionY[vId];
+           const dist = Math.sqrt(dx*dx + dy*dy);
+           if (dist > 1.0) { S.vehVelocityX[vId] = (dx/dist) * 2.5; S.vehVelocityY[vId] = (dy/dist) * 2.5; }
+        } else {
+           if (S.tickCount % 120 === 0) {
+              S.vehVelocityX[vId] = (Math.random() - 0.5) * 2;
+              S.vehVelocityY[vId] = (Math.random() - 0.5) * 2;
+           }
+        }
       }
       continue;
     }
@@ -570,10 +615,21 @@ export function SteeringSystem(): void {
       const dx = S.vehPositionX[vId] - S.positionX[i];
       const dy = S.vehPositionY[vId] - S.positionY[i];
       const distSq = dx*dx + dy*dy;
-      if (distSq < 16.0) {
+      if (distSq < 25.0) {
         if (S.vehPilotId[vId] === -1) {
            S.isMounted[i] = 1; S.vehPilotId[vId] = i; S.velocityX[i] = 0; S.velocityY[i] = 0;
-        } else { S.targetVehicleId[i] = -1; }
+        } else {
+           let count = 0;
+           for(let j = 0; j < C.MAX_ENTITIES; j++) {
+              if (S.targetVehicleId[j] === vId && S.isMounted[j] === 1) count++;
+           }
+           const maxCap = S.vehType[vId] === C.VEHICLE_SHIP ? C.MAX_PASSENGERS_SHIP : C.MAX_PASSENGERS_WAGON;
+           if (count < maxCap) {
+              S.isMounted[i] = 1; S.velocityX[i] = 0; S.velocityY[i] = 0;
+           } else {
+              S.targetVehicleId[i] = -1;
+           }
+        }
         continue;
       }
       const dist = Math.sqrt(distSq);
@@ -612,12 +668,26 @@ export function SteeringSystem(): void {
         if (S.state[i] === C.EntityState.ReturningToDepot) {
           const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS];
           const invSlot = S.charTool[i]; // 0=wood, 1=gold, 2=food, 3=misc
-          Atomics.add(S.groupTotalWealth, gid, S.entityInventory[i]);
           
           if (S.bldType[bldId] === C.BuildingType.Warehouse) {
-            if (invSlot === 0) Atomics.add(S.bldDataA, bldId, S.entityInventory[i]);
-            else if (invSlot === 1) Atomics.add(S.bldDataB, bldId, S.entityInventory[i]);
-            else if (invSlot === 2) Atomics.add(S.bldDataC, bldId, S.entityInventory[i]);
+            const tier = S.bldTier[bldId];
+            let limit = 5000;
+            if (tier === 2) limit = 25000;
+            else if (tier === 3) limit = 100000;
+            
+            const currentAmount = invSlot === 0 ? S.bldDataA[bldId] : (invSlot === 1 ? S.bldDataB[bldId] : S.bldDataC[bldId]);
+            const spaceLeft = Math.max(0, limit - currentAmount);
+            const amountToDeposit = Math.min(S.entityInventory[i], spaceLeft);
+
+            if (amountToDeposit > 0) {
+              if (invSlot === 0) Atomics.add(S.bldDataA, bldId, amountToDeposit);
+              else if (invSlot === 1) Atomics.add(S.bldDataB, bldId, amountToDeposit);
+              else if (invSlot === 2) Atomics.add(S.bldDataC, bldId, amountToDeposit);
+              Atomics.add(S.groupTotalWealth, gid, amountToDeposit);
+            }
+          } else {
+            // Non-warehouse return (just add to group wealth directly for now)
+            Atomics.add(S.groupTotalWealth, gid, S.entityInventory[i]);
           }
           
           S.entityInventory[i] = 0;

@@ -26,6 +26,9 @@ function tick(): void {
       M.TradeSystem();
       M.InfluenceSystem();
     }
+    if (S.tickCount % 120 === 0) {
+      M.StructureEvolutionSystem();
+    }
     M.GroupKnowledgeDecaySystem();
     M.BuffSystem();  // Run once per day (3600 ticks)
   }
@@ -115,6 +118,7 @@ self.onmessage = (e: MessageEvent) => {
           bldType: S.bldType.buffer,
           bldHealth: S.bldHealth.buffer,
           bldOwnerGroup: S.bldOwnerGroup.buffer,
+          bldTier: S.bldTier.buffer,
           bldDataA: S.bldDataA.buffer,
           bldDataB: S.bldDataB.buffer,
           bldDataC: S.bldDataC.buffer,
@@ -134,7 +138,10 @@ self.onmessage = (e: MessageEvent) => {
           itemInstanceOwnerType: S.itemInstanceOwnerType.buffer,
           itemInstanceOwnerId: S.itemInstanceOwnerId.buffer,
           itemInstanceX: S.itemInstanceX.buffer,
-          itemInstanceY: S.itemInstanceY.buffer
+          itemInstanceY: S.itemInstanceY.buffer,
+          playerTargetX: S.playerTargetX.buffer,
+          playerTargetY: S.playerTargetY.buffer,
+          scenarioState: S.scenarioState.buffer
         }
       });
     } else {
@@ -158,6 +165,20 @@ self.onmessage = (e: MessageEvent) => {
   if (type === "GROUP_COMMAND") {
     const payload = data.payload || data;
     U.broadcastGroupCommand(payload.groupId, payload.commandState, payload.targetX, payload.targetY);
+  }
+
+  if (type === "PLAYER_COMMAND_MOVE") {
+    const { entityId, tx, ty } = data.payload;
+    // PERMISSION GUARD: If scenarioState[0] !== -1, verify group match
+    if (S.scenarioState[0] !== -1) {
+      const gid = S.groupAffiliations[entityId * C.MAX_GROUP_CHANNELS + 0];
+      if (gid !== S.scenarioState[0]) return;
+    }
+    
+    S.playerTargetX[entityId] = tx;
+    S.playerTargetY[entityId] = ty;
+    S.targetEntityId[entityId] = -3; // Token code indicating player override state
+    S.state[entityId] = C.EntityState.Idle; // Interrupt current automated state machine
   }
   
   if (type === "CREATE_GROUP") {

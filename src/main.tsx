@@ -366,8 +366,9 @@ window.addEventListener('DOMContentLoaded', () => {
     let worldMap: Uint8Array, territoryOwnerMap: Int32Array, influenceMap: Int16Array, workerSync: Int32Array;
     let ruleRegistry: Int32Array, logicBytecode: Int32Array, groupPopulation: Int32Array, groupTotalWealth: Int32Array, groupBuildingCount: Int32Array;
     let groupWood: Int32Array, groupGold: Int32Array, groupFood: Int32Array, groupMisc: Int32Array;
-    let bldPositionX: Float32Array, bldPositionY: Float32Array, bldType: Uint8Array, bldHealth: Int32Array, bldOwnerGroup: Int32Array;
+    let bldPositionX: Float32Array, bldPositionY: Float32Array, bldType: Uint8Array, bldHealth: Int32Array, bldOwnerGroup: Int32Array, bldTier: Uint8Array;
     let vehPositionX: Float32Array, vehPositionY: Float32Array, vehType: Uint8Array, vehOwnerGroup: Int32Array;
+    let playerTargetX: Float32Array, playerTargetY: Float32Array, scenarioState: Int32Array;
 
     // VAOs
     const tileVao = gl.createVertexArray(); gl.bindVertexArray(tileVao);
@@ -449,11 +450,40 @@ window.addEventListener('DOMContentLoaded', () => {
       const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
       const worldX = cameraX + ((e.clientX - rect.left) * scaleX) / zoom;
       const worldY = cameraY + ((e.clientY - rect.top) * scaleY) / zoom;
+      
       if ((window as any).brushState?.active) {
         workers.forEach(w => w.postMessage({ type: "PAINT_ENTITIES", payload: { x: worldX, y: worldY, radius: 50, groupId: (window as any).brushState.groupId, traitBitmask: (window as any).brushState.trait } }));
       } else {
+        // Broadphase search for selection
+        let foundIdx = -1;
+        let minDist = 20.0;
+        if (positionX) {
+          for (let i = 0; i < 100_000; i++) {
+            if (state && state[i] === 5) continue;
+            const dx = positionX[i] - worldX;
+            const dy = positionY[i] - worldY;
+            const d = Math.sqrt(dx*dx + dy*dy);
+            if (d < minDist) { minDist = d; foundIdx = i; }
+          }
+        }
+        inspectEntityId = foundIdx;
         workers[0].postMessage({ type: "FIND_ENTITY", payload: { x: worldX, y: worldY, radius: 20 } });
       }
+    });
+
+    canvas.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (inspectEntityId === -1 || uiPopup.classList.contains('visible')) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
+      const worldX = cameraX + ((e.clientX - rect.left) * scaleX) / zoom;
+      const worldY = cameraY + ((e.clientY - rect.top) * scaleY) / zoom;
+      
+      workers[0].postMessage({ 
+        type: 'PLAYER_COMMAND_MOVE', 
+        payload: { entityId: inspectEntityId, tx: worldX, ty: worldY } 
+      });
     });
 
     btnToggleLoop.onclick = () => { isLooping = !isLooping; btnToggleLoop.textContent = isLooping ? "⏸" : "▶"; if (isLooping) startTick(); };
@@ -642,8 +672,9 @@ window.addEventListener('DOMContentLoaded', () => {
         if (type === "INITIALIZED") {
           console.log("Worker 0 initialized, mapping buffers...");
           positionX = new Float32Array(buffers.positionX); positionY = new Float32Array(buffers.positionY); traitBitmask = new Uint32Array(buffers.traitBitmask); groupAffiliations = new Int32Array(buffers.groupAffiliations); health = new Int32Array(buffers.health); money = new Int32Array(buffers.money); state = new Uint8Array(buffers.state); entityInventory = new Int16Array(buffers.entityInventory); worldMap = new Uint8Array(buffers.worldMap); territoryOwnerMap = new Int32Array(buffers.territoryOwnerMap); influenceMap = new Int16Array(buffers.influenceMap); workerSync = new Int32Array(buffers.workerSync); ruleRegistry = new Int32Array(buffers.ruleRegistry); logicBytecode = new Int32Array(buffers.logicBytecode); groupPopulation = new Int32Array(buffers.groupPopulationCount); groupTotalWealth = new Int32Array(buffers.groupTotalWealth); groupBuildingCount = new Int32Array(buffers.groupBuildingCount); groupWood = new Int32Array(buffers.groupWood); groupGold = new Int32Array(buffers.groupGold); groupFood = new Int32Array(buffers.groupFood); groupMisc = new Int32Array(buffers.groupMisc);
-          bldPositionX = new Float32Array(buffers.bldPositionX); bldPositionY = new Float32Array(buffers.bldPositionY); bldType = new Uint8Array(buffers.bldType); bldHealth = new Int32Array(buffers.bldHealth); bldOwnerGroup = new Int32Array(buffers.bldOwnerGroup);
+          bldPositionX = new Float32Array(buffers.bldPositionX); bldPositionY = new Float32Array(buffers.bldPositionY); bldType = new Uint8Array(buffers.bldType); bldHealth = new Int32Array(buffers.bldHealth); bldOwnerGroup = new Int32Array(buffers.bldOwnerGroup); bldTier = new Uint8Array(buffers.bldTier);
           vehPositionX = new Float32Array(buffers.vehPositionX); vehPositionY = new Float32Array(buffers.vehPositionY); vehType = new Uint8Array(buffers.vehType); vehOwnerGroup = new Int32Array(buffers.vehOwnerGroup);
+          playerTargetX = new Float32Array(buffers.playerTargetX); playerTargetY = new Float32Array(buffers.playerTargetY); scenarioState = new Int32Array(buffers.scenarioState);
           workers.slice(1).forEach((sw, si) => sw.postMessage({ type: "INIT", payload: { quadrantIndex: si + 1, buffers } }));
           requestAnimationFrame(render); setInterval(syncReact, 200);
           startTick();

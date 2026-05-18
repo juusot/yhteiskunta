@@ -203,6 +203,37 @@ export function SummarySystem(): void {
   }
 
   self.postMessage({ type: "STATS_UPDATE", payload: { totalActive } });
+
+  EvaluateScenarioMilestones();
+}
+
+/**
+ * Phase 25: Scenario Milestone Monitor
+ * Evaluates success conditions and notifies UI
+ */
+export function EvaluateScenarioMilestones(): void {
+  const metric = S.scenarioState[1];
+  if (metric === 0) return;
+
+  const gid = S.scenarioState[3];
+  if (gid === -1 || gid >= C.MAX_GROUPS) return;
+
+  const targetValue = S.scenarioState[2];
+  let complete = false;
+
+  if (metric === 1) {
+    // Population Goal
+    if (S.groupPopulationCount[gid] >= targetValue) complete = true;
+  } else if (metric === 2) {
+    // Wealth Goal
+    if (S.groupTotalWealth[gid] >= targetValue) complete = true;
+  }
+
+  if (complete) {
+    self.postMessage({ type: "SCENARIO_COMPLETE" });
+    // Reset target to prevent duplicate messages
+    S.scenarioState[1] = 0;
+  }
 }
 
 const logicStack = new Int8Array(16);
@@ -577,6 +608,62 @@ function triggerAnarchy(governingGroupId: number): void {
         S.groupAffiliations[baseIdx + 0] = slot1Group;  // Promote
         S.groupAffiliations[baseIdx + 1] = governingGroupId; // Demote
         S.groupAffiliations[baseIdx + 5] = governingGroupId; // Ensure at bottom
+      }
+    }
+  }
+}
+
+/**
+ * Phase 23: Structure Evolution System
+ * Evaluates building upgrades based on group resources.
+ */
+export function StructureEvolutionSystem(): void {
+  for (let i = 0; i < C.MAX_BUILDINGS; i++) {
+    if (S.bldHealth[i] <= 0 || S.bldType[i] === 0) continue;
+    
+    const gid = S.bldOwnerGroup[i];
+    if (gid === -1 || gid >= C.MAX_GROUPS) continue;
+    
+    const currentTier = S.bldTier[i];
+    if (currentTier >= 3) continue; // Max tier reached
+    
+    let canUpgrade = false;
+    let costWood = 0;
+    let costGold = 0;
+    
+    if (currentTier === 1) {
+      costWood = C.UPGRADE_TIER2_WOOD;
+      costGold = C.UPGRADE_TIER2_GOLD;
+    } else if (currentTier === 2) {
+      costWood = C.UPGRADE_TIER3_WOOD;
+      costGold = C.UPGRADE_TIER3_GOLD;
+    }
+    
+    if (S.groupWood[gid] >= costWood && S.groupGold[gid] >= costGold) {
+      canUpgrade = true;
+    }
+    
+    if (canUpgrade) {
+      // Deduct resources
+      Atomics.sub(S.groupWood, gid, costWood);
+      Atomics.sub(S.groupGold, gid, costGold);
+      Atomics.sub(S.groupTotalWealth, gid, costWood + costGold);
+      
+      // Increment tier
+      S.bldTier[i] = currentTier + 1;
+      
+      // Re-calculate generic registers based on new tier
+      if (S.bldType[i] === C.BuildingType.Warehouse) {
+        // Warehouse Storage Limit
+        let newCapacity = 5000;
+        if (S.bldTier[i] === 2) newCapacity = 25000;
+        else if (S.bldTier[i] === 3) newCapacity = 100000;
+        // DataA/B/C are the current items stored, we don't overwrite them here. 
+        // We will enforce the new capacities in parallel.ts when depositing.
+      } else if (S.bldType[i] === C.BuildingType.House) {
+        // Residential Capacity (DataB is Max Capacity)
+        if (S.bldTier[i] === 2) S.bldDataB[i] = 12;
+        else if (S.bldTier[i] === 3) S.bldDataB[i] = 30;
       }
     }
   }

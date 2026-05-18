@@ -192,6 +192,7 @@ export function createGroup(name: string, _ownerId: number = -1): number {
           S.bldType[b] = C.BuildingType.Warehouse;
           S.bldHealth[b] = 1000;
           S.bldOwnerGroup[b] = g;
+          S.bldTier[b] = C.BLD_TIER_1;
           S.bldPositionX[b] = 100 + g * 50;  // Spread out
           S.bldPositionY[b] = 100 + g * 50;
           S.bldDataA[b] = 5000;
