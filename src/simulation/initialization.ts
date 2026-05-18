@@ -51,6 +51,11 @@ export function initializeWorld(): void {
     S.bldDataB[i] = 0;
     S.bldDataC[i] = 0;
   }
+  // Reset Projectiles
+  for (let i = 0; i < C.MAX_PROJECTILES; i++) {
+    S.projType[i] = 0;
+    S.projLifeTime[i] = 0;
+  }
   // Reset Vehicles
   for (let i = 0; i < C.MAX_VEHICLES; i++) {
     S.vehType[i] = 0; S.vehHealth[i] = 0; S.vehPilotId[i] = -1; S.vehOwnerGroup[i] = -1;

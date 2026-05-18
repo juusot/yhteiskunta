@@ -345,3 +345,31 @@ export function sendEventToGroup(groupId: number, eventType: number): number {
   console.log(`Event ${eventType} sent to ${sent} members of Group ${groupId}`);
   return sent;
 }
+
+/**
+ * Phase 4: Create a new physical item instance in the world
+ */
+export function createItemInstance(defId: number, ownerType: number, x: number, y: number, ownerId: number = -1): number {
+  for (let i = 0; i < C.MAX_ITEM_INSTANCES; i++) {
+    if (S.itemInstanceOwnerType[i] === 0) { // 0 = Inactive
+      S.itemInstanceDefId[i] = defId;
+      S.itemInstanceOwnerType[i] = ownerType;
+      S.itemInstanceOwnerId[i] = ownerId;
+      S.itemInstanceX[i] = x;
+      S.itemInstanceY[i] = y;
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Phase 4: Place an item instance on the ground
+ */
+export function setItemInstanceGround(instanceId: number, x: number, y: number): void {
+  if (instanceId < 0 || instanceId >= C.MAX_ITEM_INSTANCES) return;
+  S.itemInstanceOwnerType[instanceId] = 1; // 1 = Ground
+  S.itemInstanceX[instanceId] = x;
+  S.itemInstanceY[instanceId] = y;
+  S.itemInstanceOwnerId[instanceId] = -1;
+}

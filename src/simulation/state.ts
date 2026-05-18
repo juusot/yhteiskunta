@@ -144,6 +144,15 @@ export let playerTargetY: Float32Array; // Size: C.MAX_ENTITIES * 4 bytes
 // Phase 25: Player Interaction & Scenario
 export let scenarioState: Int32Array; // 0: allowedGroupId, 1: targetMetric, 2: targetValue, 3: targetGroupId
 
+// Phase 24: Projectiles
+export let projPositionX: Float32Array;
+export let projPositionY: Float32Array;
+export let projVelocityX: Float32Array;
+export let projVelocityY: Float32Array;
+export let projType: Uint8Array;
+export let projOwnerGroup: Int32Array;
+export let projLifeTime: Int16Array;
+
 export let quadrantIndex: number = -1;
 export let minX = 0, maxX = 1600, minY = 0, maxY = 1200;
 export let tickCount = 0;
@@ -282,6 +291,15 @@ export function initializeState(): void {
   scenarioState[2] = 0;  // targetValue
   scenarioState[3] = -1; // targetGroupId
 
+  // Projectiles
+  projPositionX = new Float32Array(new SharedArrayBuffer(C.MAX_PROJECTILES * 4));
+  projPositionY = new Float32Array(new SharedArrayBuffer(C.MAX_PROJECTILES * 4));
+  projVelocityX = new Float32Array(new SharedArrayBuffer(C.MAX_PROJECTILES * 4));
+  projVelocityY = new Float32Array(new SharedArrayBuffer(C.MAX_PROJECTILES * 4));
+  projType = new Uint8Array(new SharedArrayBuffer(C.MAX_PROJECTILES));
+  projOwnerGroup = new Int32Array(new SharedArrayBuffer(C.MAX_PROJECTILES * 4));
+  projLifeTime = new Int16Array(new SharedArrayBuffer(C.MAX_PROJECTILES * 2));
+
   initializeLocalState();
 }
 
@@ -381,6 +399,14 @@ export function mapStateBuffers(buffers: any): void {
   playerTargetY = new Float32Array(buffers.playerTargetY);
 
   scenarioState = new Int32Array(buffers.scenarioState);
+
+  projPositionX = new Float32Array(buffers.projPositionX);
+  projPositionY = new Float32Array(buffers.projPositionY);
+  projVelocityX = new Float32Array(buffers.projVelocityX);
+  projVelocityY = new Float32Array(buffers.projVelocityY);
+  projType = new Uint8Array(buffers.projType);
+  projOwnerGroup = new Int32Array(buffers.projOwnerGroup);
+  projLifeTime = new Int16Array(buffers.projLifeTime);
 
   initializeLocalState();
 }

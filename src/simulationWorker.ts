@@ -35,6 +35,8 @@ function tick(): void {
 
   // Phase 2: Autonomy & Steering
   P.LifeSystem();
+  P.ProjectileSystem();
+  P.AuraSystem();
   P.AutonomySystem();
   P.SteeringSystem();
 
@@ -141,7 +143,14 @@ self.onmessage = (e: MessageEvent) => {
           itemInstanceY: S.itemInstanceY.buffer,
           playerTargetX: S.playerTargetX.buffer,
           playerTargetY: S.playerTargetY.buffer,
-          scenarioState: S.scenarioState.buffer
+          scenarioState: S.scenarioState.buffer,
+          projPositionX: S.projPositionX.buffer,
+          projPositionY: S.projPositionY.buffer,
+          projVelocityX: S.projVelocityX.buffer,
+          projVelocityY: S.projVelocityY.buffer,
+          projType: S.projType.buffer,
+          projOwnerGroup: S.projOwnerGroup.buffer,
+          projLifeTime: S.projLifeTime.buffer
         }
       });
     } else {

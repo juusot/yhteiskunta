@@ -74,7 +74,13 @@ export enum BuildingType {
   Tower = 3,
   Wall = 4,
   Field = 5,
+  MindControl = 6,
 }
+
+// Projectile Constants
+export const MAX_PROJECTILES = 20000;
+export const PROJ_TYPE_ARROW = 1;
+export const PROJ_TYPE_FIREBALL = 2;
 
 // Architectural Tiers
 export const BLD_TIER_1 = 1;

@@ -369,6 +369,7 @@ window.addEventListener('DOMContentLoaded', () => {
     let bldPositionX: Float32Array, bldPositionY: Float32Array, bldType: Uint8Array, bldHealth: Int32Array, bldOwnerGroup: Int32Array, bldTier: Uint8Array;
     let vehPositionX: Float32Array, vehPositionY: Float32Array, vehType: Uint8Array, vehOwnerGroup: Int32Array;
     let playerTargetX: Float32Array, playerTargetY: Float32Array, scenarioState: Int32Array;
+    let projPositionX: Float32Array, projPositionY: Float32Array, projType: Uint8Array, projLifeTime: Int16Array;
 
     // VAOs
     const tileVao = gl.createVertexArray(); gl.bindVertexArray(tileVao);
@@ -675,6 +676,7 @@ window.addEventListener('DOMContentLoaded', () => {
           bldPositionX = new Float32Array(buffers.bldPositionX); bldPositionY = new Float32Array(buffers.bldPositionY); bldType = new Uint8Array(buffers.bldType); bldHealth = new Int32Array(buffers.bldHealth); bldOwnerGroup = new Int32Array(buffers.bldOwnerGroup); bldTier = new Uint8Array(buffers.bldTier);
           vehPositionX = new Float32Array(buffers.vehPositionX); vehPositionY = new Float32Array(buffers.vehPositionY); vehType = new Uint8Array(buffers.vehType); vehOwnerGroup = new Int32Array(buffers.vehOwnerGroup);
           playerTargetX = new Float32Array(buffers.playerTargetX); playerTargetY = new Float32Array(buffers.playerTargetY); scenarioState = new Int32Array(buffers.scenarioState);
+          projPositionX = new Float32Array(buffers.projPositionX); projPositionY = new Float32Array(buffers.projPositionY); projType = new Uint8Array(buffers.projType); projLifeTime = new Int16Array(buffers.projLifeTime);
           workers.slice(1).forEach((sw, si) => sw.postMessage({ type: "INIT", payload: { quadrantIndex: si + 1, buffers } }));
           requestAnimationFrame(render); setInterval(syncReact, 200);
           startTick();
