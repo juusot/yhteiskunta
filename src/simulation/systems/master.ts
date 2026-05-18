@@ -17,6 +17,8 @@ export function SummarySystem(): void {
   let totalActive = 0;
   
   S.groupHouseCapacity.fill(0);
+  S.groupWarehouseX.fill(0);
+  S.groupWarehouseY.fill(0);
 
   // Phase 23: National Cohesion System
   // Update cohesion for all active groups
@@ -46,21 +48,22 @@ export function SummarySystem(): void {
     if (S.state[i] !== C.EntityState.Dead) {
       // Count only public slots (0-7) for demographics
       const baseIdx = i * C.MAX_GROUP_CHANNELS;
-      let hasPublicAffiliation = false;
+      let primaryGid = -1;
       for (let s = 0; s < C.PUBLIC_GROUP_SLOTS; s++) {
         const gid = S.groupAffiliations[baseIdx + s];
         if (gid >= 0 && gid < C.MAX_GROUPS) {
           S.groupPopulationCount[gid]++;
-          hasPublicAffiliation = true;
+          if (primaryGid === -1) primaryGid = gid;
         }
       }
-      if (hasPublicAffiliation) {
-        S.groupTotalWealth[i] += S.money[i];
-        S.groupGold[i] += S.money[i];
+      if (primaryGid !== -1) {
+        S.groupTotalWealth[primaryGid] += S.money[i];
+        S.groupGold[primaryGid] += S.money[i];
         totalActive++;
       }
     }
   }
+
 
   // Add building inventories to wealth and update building counts
   for (let b = 0; b < C.MAX_BUILDINGS; b++) {
@@ -69,6 +72,12 @@ export function SummarySystem(): void {
       if (gid >= 0 && gid < C.MAX_GROUPS) {
         S.groupBuildingCount[gid]++;
         if (S.bldType[b] === C.BuildingType.Warehouse) {
+          // Update group warehouse location to the first functional warehouse found
+          if (S.groupWarehouseX[gid] === 0) {
+            S.groupWarehouseX[gid] = S.bldPositionX[b];
+            S.groupWarehouseY[gid] = S.bldPositionY[b];
+          }
+          
           S.groupTotalWealth[gid] += S.bldDataA[b] + S.bldDataB[b] + S.bldDataC[b];
           S.groupWood[gid] += S.bldDataA[b];
           S.groupGold[gid] += S.bldDataB[b];

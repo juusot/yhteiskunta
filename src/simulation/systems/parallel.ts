@@ -38,7 +38,9 @@ export function SpatialUpdateSystem(): void {
     
     if (tx >= 0 && tx < C.GRID_COLS && ty >= 0 && ty < C.GRID_ROWS) {
       const cellIdx = ty * C.GRID_COLS + tx;
-      S.spatialNext[i] = Atomics.exchange(S.spatialHead, cellIdx, i);
+      if (cellIdx >= 0 && cellIdx < S.spatialHead.length) {
+        S.spatialNext[i] = Atomics.exchange(S.spatialHead, cellIdx, i);
+      }
     }
   }
 
@@ -51,7 +53,9 @@ export function SpatialUpdateSystem(): void {
     const ty = Math.floor(S.bldPositionY[i] / C.GRID_SIZE);
     if (tx >= 0 && tx < C.GRID_COLS && ty >= 0 && ty < C.GRID_ROWS) {
       const cellIdx = ty * C.GRID_COLS + tx;
-      S.bldSpatialNext[i] = Atomics.exchange(S.bldSpatialHead, cellIdx, i);
+      if (cellIdx >= 0 && cellIdx < S.bldSpatialHead.length) {
+        S.bldSpatialNext[i] = Atomics.exchange(S.bldSpatialHead, cellIdx, i);
+      }
     }
   }
 
@@ -64,7 +68,9 @@ export function SpatialUpdateSystem(): void {
     const ty = Math.floor(S.vehPositionY[i] / C.GRID_SIZE);
     if (tx >= 0 && tx < C.GRID_COLS && ty >= 0 && ty < C.GRID_ROWS) {
       const cellIdx = ty * C.GRID_COLS + tx;
-      S.vehSpatialNext[i] = Atomics.exchange(S.vehSpatialHead, cellIdx, i);
+      if (cellIdx >= 0 && cellIdx < S.vehSpatialHead.length) {
+        S.vehSpatialNext[i] = Atomics.exchange(S.vehSpatialHead, cellIdx, i);
+      }
     }
   }
 
@@ -77,7 +83,9 @@ export function SpatialUpdateSystem(): void {
     const ty = Math.floor(S.itemInstanceY[i] / C.GRID_SIZE);
     if (tx >= 0 && tx < C.GRID_COLS && ty >= 0 && ty < C.GRID_ROWS) {
       const cellIdx = ty * C.GRID_COLS + tx;
-      S.itemSpatialNext[i] = Atomics.exchange(S.itemSpatialHead, cellIdx, i);
+      if (cellIdx >= 0 && cellIdx < S.itemSpatialHead.length) {
+        S.itemSpatialNext[i] = Atomics.exchange(S.itemSpatialHead, cellIdx, i);
+      }
     }
   }
 }
@@ -166,6 +174,81 @@ export function IntelReportingSystem(): void {
   }
 }
 
+function HandleLocalizedConstruction(i: number, gid: number): boolean {
+  // Only attempt construction periodically to save cycles
+  if (S.tickCount % (180 + (i % 60)) !== 0) return false;
+  if (S.groupBuildingCount[gid] >= 100) return false;
+
+  const wood = S.groupWood[gid];
+  const gold = S.groupGold[gid];
+  const pop = S.groupPopulationCount[gid];
+  const cap = S.groupHouseCapacity[gid];
+
+  let buildType = C.BuildingType.None;
+  let costWood = 0;
+  let costGold = 0;
+
+  // Determine what to build based on group needs
+  if (S.groupFood[gid] < pop * 10 && wood >= 200) {
+    buildType = C.BuildingType.Field; costWood = 200;
+  } else if (pop >= cap - 10 && wood >= 300) {
+    buildType = C.BuildingType.House; costWood = 300;
+  } else if (wood >= 1000 && gold >= 500 && S.groupBuildingCount[gid] < 50) {
+    buildType = C.BuildingType.Tower; costWood = 1000; costGold = 500;
+  }
+
+  if (buildType === C.BuildingType.None) return false;
+
+  // Find nearest warehouse to check real-time stock
+  const whId = U.findNearestOwnedBuilding(S.positionX[i], S.positionY[i], 2000, C.BuildingType.Warehouse, gid);
+  if (whId === -1) return false;
+
+  // Atomic check for resources
+  const currentWood = Atomics.load(S.bldDataA, whId);
+  const currentGold = Atomics.load(S.bldDataB, whId);
+  if (currentWood < costWood || currentGold < costGold) return false;
+
+  // Try to find a valid expansion spot
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 50 + Math.random() * 150;
+    const buildX = S.positionX[i] + Math.cos(angle) * dist;
+    const buildY = S.positionY[i] + Math.sin(angle) * dist;
+
+    // Localized expansion: check if within influence
+    if (U.isInGroupInfluence(buildX, buildY, gid)) {
+      // Density check: don't crowd buildings
+      if (U.findNearestBuilding(buildX, buildY, 40, -1) === -1) {
+        // Find empty building slot
+        for (let b = 0; b < C.MAX_BUILDINGS; b++) {
+          if (Atomics.compareExchange(S.bldType, b, 0, buildType) === 0) {
+            // Deduct resources atomically
+            Atomics.sub(S.bldDataA, whId, costWood);
+            Atomics.sub(S.bldDataB, whId, costGold);
+
+            // Initialize building
+            S.bldPositionX[b] = buildX;
+            S.bldPositionY[b] = buildY;
+            S.bldHealth[b] = 10; // Starts with low health, character builds it up
+            S.bldOwnerGroup[b] = gid;
+            S.bldTier[b] = C.BLD_TIER_1;
+            S.bldDataA[b] = 0;
+            S.bldDataB[b] = (buildType === C.BuildingType.House ? 20 : 0);
+            S.bldDataC[b] = 0;
+
+            S.targetBuildingId[i] = b;
+            S.state[i] = C.EntityState.Construction;
+            S.actionTimer[i] = 200; // Time to build
+            return true;
+          }
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
 export function AutonomySystem(): void {
   for (let i = 0; i < C.MAX_ENTITIES; i++) {
     if (S.state[i] === C.EntityState.Dead || (S.traitBitmask[i] & C.TRAIT_TREE) !== 0) continue;
@@ -201,35 +284,9 @@ export function AutonomySystem(): void {
     // === PRIORITY 3: GROUP COMMANDS ===
     if (S.state[i] === C.EntityState.Combat || S.state[i] === C.EntityState.Trading || S.state[i] === C.EntityState.ReportingIntel) continue;
 
-    // === PRIORITY 4: CONSTRUCTION ===
-    if (gid >= 0 && gid < C.MAX_GROUPS && S.groupBuildingCount[gid] < 10) {
-      const hasWood = S.groupWood[gid] > 300;
-      const needField = S.groupFood[gid] < S.groupPopulationCount[gid] * 20;
-      if (needField && hasWood) {
-        let hasField = false;
-        for (let b = 0; b < C.MAX_BUILDINGS; b++) {
-          if (S.bldType[b] === C.BuildingType.Field && S.bldOwnerGroup[b] === gid) { hasField = true; break; }
-        }
-        if (!hasField) {
-          let fieldBuilt = false;
-          for (let b = 0; b < C.MAX_BUILDINGS; b++) {
-            if (S.bldType[b] === 0) {
-              const buildX = S.groupWarehouseX[gid] + (Math.random() - 0.5) * 100;
-              const buildY = S.groupWarehouseY[gid] + (Math.random() - 0.5) * 100;
-              if (U.isInGroupInfluence(buildX, buildY, gid)) {
-                // ATOMIC CHECK: Ensure slot is still empty
-                if (Atomics.compareExchange(S.bldType, b, 0, C.BuildingType.Field) === 0) {
-                  S.bldPositionX[b] = buildX; S.bldPositionY[b] = buildY; S.bldHealth[b] = 50; S.bldOwnerGroup[b] = gid; S.bldTier[b] = C.BLD_TIER_1; S.bldDataA[b] = 0; S.bldDataB[b] = 0; S.bldDataC[b] = 0;
-                  S.targetBuildingId[i] = b; S.state[i] = C.EntityState.Construction; S.actionTimer[i] = 120;
-                  Atomics.add(S.groupBuildingCount, gid, 1); Atomics.sub(S.groupTotalWealth, gid, 200); fieldBuilt = true;
-                }
-              }
-            }
-            if (fieldBuilt) break;
-          }
-          if (fieldBuilt) continue;
-        }
-      }
+    // === PRIORITY 4: CONSTRUCTION & LOCALIZED EXPANSION ===
+    if (gid >= 0 && gid < C.MAX_GROUPS) {
+      if (HandleLocalizedConstruction(i, gid)) continue;
     }
 
     // === PRIORITY 5: IDLE & LOOTING DISCOVERY ===

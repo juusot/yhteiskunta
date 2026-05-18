@@ -14,6 +14,7 @@ export let traitBitmask: Uint32Array;
 export let targetEntityId: Int32Array;
 export let targetBuildingId: Int32Array; // -1 if none
 export let targetVehicleId: Int32Array; // -1 if none
+export let targetItemId: Int32Array; // -1 if none
 export let isMounted: Uint8Array; // 1 if mounted, 0 otherwise
 export let pendingEvents: Int32Array;
 
@@ -39,13 +40,15 @@ export let effectiveLifespan: Int16Array;   // Base + buffs
 export let effectiveDamage: Int16Array;     // Base + buffs
 export let effectiveSpeed: Float32Array;    // Base × buffs
 
-// Spatial Partitioning Arrays (Local to each worker)
+// Spatial Partitioning Arrays (Shared between workers)
 export let spatialHead: Int32Array;
 export let spatialNext: Int32Array;
 export let bldSpatialHead: Int32Array;
 export let bldSpatialNext: Int32Array;
 export let vehSpatialHead: Int32Array;
 export let vehSpatialNext: Int32Array;
+export let itemSpatialHead: Int32Array;
+export let itemSpatialNext: Int32Array;
 
 // Entity Group Affiliations
 export let groupAffiliations: Int32Array;
@@ -201,6 +204,8 @@ export function initializeState(): void {
   targetBuildingId.fill(-1);
   targetVehicleId = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
   targetVehicleId.fill(-1);
+  targetItemId = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
+  targetItemId.fill(-1);
   isMounted = new Uint8Array(new SharedArrayBuffer(C.MAX_ENTITIES));
   isMounted.fill(0);
   pendingEvents = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * C.EVENT_SLOTS_PER_CHARACTER * 4));
@@ -252,6 +257,23 @@ export function initializeState(): void {
   influenceMap = new Int16Array(new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS * 2));
   territoryOwnerMap = new Int32Array(new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS * 4));
 
+  spatialHead = new Int32Array(new SharedArrayBuffer(C.NUM_CELLS * 4));
+  spatialHead.fill(-1);
+  spatialNext = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
+  spatialNext.fill(-1);
+  bldSpatialHead = new Int32Array(new SharedArrayBuffer(C.NUM_CELLS * 4));
+  bldSpatialHead.fill(-1);
+  bldSpatialNext = new Int32Array(new SharedArrayBuffer(C.MAX_BUILDINGS * 4));
+  bldSpatialNext.fill(-1);
+  vehSpatialHead = new Int32Array(new SharedArrayBuffer(C.NUM_CELLS * 4));
+  vehSpatialHead.fill(-1);
+  vehSpatialNext = new Int32Array(new SharedArrayBuffer(C.MAX_VEHICLES * 4));
+  vehSpatialNext.fill(-1);
+  itemSpatialHead = new Int32Array(new SharedArrayBuffer(C.NUM_CELLS * 4));
+  itemSpatialHead.fill(-1);
+  itemSpatialNext = new Int32Array(new SharedArrayBuffer(C.MAX_ITEM_INSTANCES * 4));
+  itemSpatialNext.fill(-1);
+
   groupHouseCapacity = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   starvingGroups = new Uint8Array(new SharedArrayBuffer(C.MAX_GROUPS));
   flowQueue = new Uint32Array(new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS * 4));
@@ -262,6 +284,7 @@ export function initializeState(): void {
   bldType = new Uint8Array(new SharedArrayBuffer(C.MAX_BUILDINGS));
   bldHealth = new Int32Array(new SharedArrayBuffer(C.MAX_BUILDINGS * 4));
   bldOwnerGroup = new Int32Array(new SharedArrayBuffer(C.MAX_BUILDINGS * 4));
+  bldTier = new Uint8Array(new SharedArrayBuffer(C.MAX_BUILDINGS));
   bldDataA = new Int32Array(new SharedArrayBuffer(C.MAX_BUILDINGS * 4));
   bldDataB = new Int32Array(new SharedArrayBuffer(C.MAX_BUILDINGS * 4));
   bldDataC = new Int32Array(new SharedArrayBuffer(C.MAX_BUILDINGS * 4));
@@ -369,6 +392,14 @@ export function mapStateBuffers(buffers: any): void {
   groupMagicFrequency = new Int8Array(buffers.groupMagicFrequency);
   influenceMap = new Int16Array(buffers.influenceMap);
   territoryOwnerMap = new Int32Array(buffers.territoryOwnerMap);
+
+  spatialHead = new Int32Array(buffers.spatialHead);
+  spatialNext = new Int32Array(buffers.spatialNext);
+  bldSpatialHead = new Int32Array(buffers.bldSpatialHead);
+  bldSpatialNext = new Int32Array(buffers.bldSpatialNext);
+  vehSpatialHead = new Int32Array(buffers.vehSpatialHead);
+  vehSpatialNext = new Int32Array(buffers.vehSpatialNext);
+
   groupHouseCapacity = new Int32Array(buffers.groupHouseCapacity);
   starvingGroups = new Uint8Array(buffers.starvingGroups);
   flowQueue = new Uint32Array(buffers.flowQueue);
@@ -428,24 +459,7 @@ export function mapStateBuffers(buffers: any): void {
 }
 
 function initializeLocalState(): void {
-  spatialHead = new Int32Array(C.NUM_CELLS);
-  spatialHead.fill(-1);
-  spatialNext = new Int32Array(C.MAX_ENTITIES);
-  spatialNext.fill(-1);
-
-  bldSpatialHead = new Int32Array(C.NUM_CELLS);
-  bldSpatialHead.fill(-1);
-  bldSpatialNext = new Int32Array(C.MAX_BUILDINGS);
-  bldSpatialNext.fill(-1);
-
-  vehSpatialHead = new Int32Array(C.NUM_CELLS);
-  vehSpatialHead.fill(-1);
-  vehSpatialNext = new Int32Array(C.MAX_VEHICLES);
-  vehSpatialNext.fill(-1);
-
   integrationField = new Float32Array(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS);
   settlementTimerMap = new Int16Array(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS);
 }
-ROWS);
-  settlementTimerMap = new Int16Array(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS);
-}
+
