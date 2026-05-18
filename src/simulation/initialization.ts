@@ -1,6 +1,7 @@
 // src/simulation/initialization.ts
 import * as C from './constants';
 import * as S from './state';
+import * as U from './utils';
 
 export function generateBiomes(): void {
   S.worldMap.fill(C.TerrainType.Grass);
@@ -134,8 +135,14 @@ export function initializeWorld(): void {
       S.velocityX[i] = (Math.random() - 0.5);
       S.velocityY[i] = (Math.random() - 0.5);
       S.health[i] = 100;
-      S.money[i] = 1000;
-      S.groupAffiliations[i * C.GROUP_SLOTS_PER_CHARACTER] = g;
+      S.actionTimer[i] = 60;
+      S.groupAffiliations[i * C.MAX_GROUP_CHANNELS + 0] = g;
+
+      const name = U.generateName();
+      S.entityNames.set(i, name);
+      if (S.quadrantIndex === 0) {
+        self.postMessage({ type: "ENTITY_NAMED", payload: { entityId: i, name } });
+      }
       // Default stats with variance for spawned characters
       S.lifespan[i] = 60 + Math.floor(Math.random() * 21);  // 60-80 years
       S.damage[i] = 10 + Math.floor((Math.random() - 0.5) * 4);  // 8-12 (±20%)

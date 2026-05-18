@@ -6,6 +6,7 @@ import * as U from './simulation/utils';
 import * as P from './simulation/systems/parallel';
 import * as M from './simulation/systems/master';
 import { initializeWorld } from './simulation/initialization';
+import { applyGroupTemplate } from './simulation/templates';
 
 function tick(): void {
   if (S.isPaused) return;
@@ -149,8 +150,11 @@ self.onmessage = (e: MessageEvent) => {
   }
   
   if (type === "CREATE_GROUP") {
-    const { name } = data.payload;
-    U.createGroup(name);
+    const { name, archetype } = data.payload;
+    const groupId = U.createGroup(name);
+    if (groupId !== -1 && archetype !== undefined && archetype > 0) {
+      applyGroupTemplate(groupId, archetype);
+    }
   }
   
   if (type === "ASSIGN_TO_GROUP") {

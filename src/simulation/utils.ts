@@ -164,6 +164,12 @@ export function waitForAll(phase: number): void {
   }
 }
 
+export function generateName(): string {
+  const first = ["Ael", "Bry", "Cen", "Dax", "Ery", "Fae", "Gai", "Hale", "Iro", "Jax"];
+  const last = ["son", "ton", "rik", "wyn", "dor", "lan", "us", "ia", "en", "th"];
+  return first[Math.floor(Math.random() * first.length)] + last[Math.floor(Math.random() * last.length)];
+}
+
 /**
  * Create a new group
  * @param name - User-friendly name for the group

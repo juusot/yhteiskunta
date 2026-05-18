@@ -616,6 +616,7 @@ window.addEventListener('DOMContentLoaded', () => {
         if (!health) return;
         const inspectEntity = inspectEntityId === -1 ? null : {
             id: inspectEntityId,
+            name: (window as any).entityNames?.[inspectEntityId] || `Entity ${inspectEntityId}`,
             health: health[inspectEntityId],
             maxHealth: 100,
             money: money[inspectEntityId],
@@ -677,8 +678,13 @@ window.addEventListener('DOMContentLoaded', () => {
         if (type === "MAGIC_BURST") { addChronicle(`Magic Burst from Group ${groupAffiliations[payload.entityId * 10] || '?'}`); }
         if (type === "SAVE_REQUEST") handleSave();
         if (type === "GROUP_CREATED") {
-          // Force React to re-render by updating tickCount (triggers stats refresh)
+          (window as any).groupNames = (window as any).groupNames || {};
+          (window as any).groupNames[payload.groupId] = payload.name;
           tickCount++;
+        }
+        if (type === "ENTITY_NAMED") {
+          (window as any).entityNames = (window as any).entityNames || {};
+          (window as any).entityNames[payload.entityId] = payload.name;
         }
       };
     });
@@ -704,8 +710,8 @@ window.addEventListener('DOMContentLoaded', () => {
     }, 2000);
     
     // Group management via worker messages
-    (window as any).createGroup = (name: string) => {
-      workers[0].postMessage({ type: 'CREATE_GROUP', payload: { name } });
+    (window as any).createGroup = (name: string, archetype: number) => {
+      workers[0].postMessage({ type: 'CREATE_GROUP', payload: { name, archetype } });
     };
     (window as any).assignToGroup = (entityId: number, groupId: number, slot: number) => {
       workers[0].postMessage({ type: 'ASSIGN_TO_GROUP', payload: { entityId, groupId, slot } });

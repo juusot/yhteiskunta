@@ -135,6 +135,7 @@ export let tickInDay = 0;
 
 // Phase 21: Group Names (sparse storage, not SharedArrayBuffer)
 export let groupNames: Map<number, string>;
+export let entityNames: Map<number, string>;
 
 export function setQuadrantIndex(idx: number) {
   quadrantIndex = idx;
@@ -196,6 +197,7 @@ export function initializeState(): void {
   groupRelationsMatrix = new Int8Array(new SharedArrayBuffer(C.MAX_GROUPS * C.MAX_GROUPS));
   groupVisualArchetypes = new Int8Array(new SharedArrayBuffer(C.MAX_GROUPS));
   groupNames = new Map<number, string>();
+  entityNames = new Map<number, string>();
   ruleRegistry = new Int32Array(new SharedArrayBuffer(C.MAX_RULES * 8 * 4));
   workerSync = new Int32Array(new SharedArrayBuffer(4 * 4));
   logicBytecode = new Int32Array(new SharedArrayBuffer(C.MAX_RULES * C.MAX_BYTECODE_PER_RULE * 4));
@@ -281,6 +283,7 @@ export function mapStateBuffers(buffers: any): void {
   groupVisualArchetypes = new Int8Array(buffers.groupVisualArchetypes);
   groupCohesion = new Int32Array(buffers.groupCohesion);
   groupNames = new Map<number, string>();
+  entityNames = new Map<number, string>();
   carriedIntelEntityId = new Int32Array(buffers.carriedIntelEntityId);
   carriedIntelX = new Float32Array(buffers.carriedIntelX);
   carriedIntelY = new Float32Array(buffers.carriedIntelY);

@@ -137,6 +137,12 @@ export function SummarySystem(): void {
         S.entityInventory[i] = 0;
         S.actionTimer[i] = 60;
         
+        const name = U.generateName();
+        S.entityNames.set(i, name);
+        if (S.quadrantIndex === 0) {
+          self.postMessage({ type: "ENTITY_NAMED", payload: { entityId: i, name } });
+        }
+        
         if (!needsSafetySpawn) S.groupTotalWealth[g] -= costPerBirth;
         births++;
         deadPtr++;
@@ -225,6 +231,22 @@ export function evaluateCompoundRule(ruleIdx: number): boolean {
         const threshold = S.logicBytecode[baseOffset + ++i];
         const dx = S.groupWarehouseX[gid] - targetX, dy = S.groupWarehouseY[gid] - targetY;
         logicStack[sp++] = (dx * dx + dy * dy > threshold * threshold) ? 1 : 0;
+        break;
+      }
+      case C.OP_TICK_MODULO: {
+        const interval = S.logicBytecode[baseOffset + ++i];
+        logicStack[sp++] = (S.tickCount % interval === 0) ? 1 : 0;
+        break;
+      }
+      case C.OP_RANDOM_CHANCE: {
+        const threshold = S.logicBytecode[baseOffset + ++i];
+        const roll = Math.random() * 100;
+        logicStack[sp++] = (roll < threshold) ? 1 : 0;
+        break;
+      }
+      case C.OP_COHESION_LT: {
+        const threshold = S.logicBytecode[baseOffset + ++i];
+        logicStack[sp++] = (S.groupCohesion[gid] < threshold) ? 1 : 0;
         break;
       }
       case C.GATE_AND: {

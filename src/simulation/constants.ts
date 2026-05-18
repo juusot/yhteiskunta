@@ -91,6 +91,16 @@ export const GATE_OR = 101;
 export const GATE_NOT = 102;
 export const OP_END = 255;
 
+export const OP_TICK_MODULO = 10;   // Interval timer
+export const OP_RANDOM_CHANCE = 11; // Probability dice roll
+export const OP_COHESION_LT = 12;   // Stability check
+
+export const ARCHETYPE_NONE = 0;
+export const ARCHETYPE_NATION = 1;
+export const ARCHETYPE_ARMY = 2;
+export const ARCHETYPE_SPY = 3;
+export const ARCHETYPE_CULT = 4;
+
 export const MAX_BYTECODE_PER_RULE = 32;
 
 // Phase 21: Group & Character Limits

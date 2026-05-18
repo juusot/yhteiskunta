@@ -15,6 +15,7 @@ interface GroupStats {
 
 interface EntityInfo {
   id: number;
+  name: string;
   health: number;
   maxHealth: number;
   money: number;
@@ -83,6 +84,7 @@ export const App: React.FC<AppProps> = ({
   const [brushGroupId, setBrushGroupId] = useState(0);
   const [brushTrait, setBrushTrait] = useState(0);
   const [newGroupName, setNewGroupName] = useState('');
+  const [selectedArchetype, setSelectedArchetype] = useState(1);
 
   useEffect(() => {
     (window as any).brushState = { active: brushActive, groupId: brushGroupId, trait: brushTrait };
@@ -134,6 +136,7 @@ export const App: React.FC<AppProps> = ({
           if (S.groupAffiliations[i * 10 + slot] === selectedGroup.id) {
             members.push({
               id: i,
+              name: (window as any).entityNames?.[i] || `Entity ${i}`,
               health: S.health[i] || 0,
               maxHealth: 100,
               money: S.money[i] || 0,
@@ -167,6 +170,7 @@ groups: Array.from(S.groupAffiliations.slice(i * 10, i * 10 + 10) as unknown as 
       if (S.state[i] === 5) continue;
         result.push({
           id: i,
+          name: (window as any).entityNames?.[i] || `Entity ${i}`,
           health: S.health[i] || 0,
           maxHealth: 100,
           money: S.money[i] || 0,
@@ -328,7 +332,7 @@ groups: Array.from(S.groupAffiliations.slice(i * 10, i * 10 + 10) as unknown as 
                   <button
                     onClick={() => {
                       if (newGroupName.trim() && (window as any).createGroup) {
-                        (window as any).createGroup(newGroupName.trim());
+                        (window as any).createGroup(newGroupName.trim(), selectedArchetype);
                         setNewGroupName('');
                       }
                     }}
@@ -343,6 +347,17 @@ groups: Array.from(S.groupAffiliations.slice(i * 10, i * 10 + 10) as unknown as 
                     placeholder="Group name..."
                     className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs"
                   />
+                  <select
+                    value={selectedArchetype}
+                    onChange={(e) => setSelectedArchetype(parseInt(e.target.value))}
+                    className="px-2 py-1 border border-gray-300 rounded text-xs"
+                  >
+                    <option value={0}>None</option>
+                    <option value={1}>Nation</option>
+                    <option value={2}>Army</option>
+                    <option value={3}>Spy Ring</option>
+                    <option value={4}>Cult</option>
+                  </select>
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto">
@@ -554,7 +569,8 @@ groups: Array.from(S.groupAffiliations.slice(i * 10, i * 10 + 10) as unknown as 
                 <div className="space-y-4">
                   <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
                     <div className="flex items-center justify-between mb-3">
-                      <h2 className="text-lg font-semibold">Entity {selectedEntity.id}</h2>
+                      <h2 className="text-lg font-semibold">{selectedEntity.name}</h2>
+                      <span className="text-xs text-gray-400">ID: {selectedEntity.id}</span>
                       <span className={`text-xs px-2 py-1 rounded ${
                         selectedEntity.state === 3 ? 'bg-red-100 text-red-700' :
                         selectedEntity.state === 1 ? 'bg-green-100 text-green-700' :
@@ -1031,4 +1047,4 @@ const RulesTab: React.FC<{ ruleRegistry: Int32Array | null; logicBytecode: Int32
   );
 };
 
-export default App;
+export default App;App;
