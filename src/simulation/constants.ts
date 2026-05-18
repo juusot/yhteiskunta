@@ -48,6 +48,9 @@ export const EVENT_BUILD = 104;
 export const EVENT_DISBAND = 105;
 export const EVENT_CUSTOM = 106;
 
+export const ACTION_SPAWN_DEFENSE_PROJECTILE = 101;
+export const ACTION_DECLARE_WAR = 102;
+
 // Phase 21: Game Time
 export const TICKS_PER_DAY = 3600;  // 60 ticks/sec × 60 sec = 1 minute real-time = 1 game day
 export const DAYS_PER_MONTH = 30;
@@ -65,6 +68,7 @@ export enum EntityState {
   ReportingIntel = 7,
   Construction = 8,
   Sabotaging = 9,  // Phase 23: Spy sabotage state
+  Looting = 10,
 }
 
 export enum BuildingType {

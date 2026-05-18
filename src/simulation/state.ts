@@ -105,6 +105,11 @@ export let influenceMap: Int16Array;
 export let territoryOwnerMap: Int32Array;
 export let settlementTimerMap: Int16Array;
 
+// Phase 26: Pre-allocated buffers for Master System (GC Optimization)
+export let groupHouseCapacity: Int32Array;
+export let starvingGroups: Uint8Array;
+export let flowQueue: Uint32Array;
+
 // Phase 22: Buildings & Vehicles Subsystems
 export let bldPositionX: Float32Array;
 export let bldPositionY: Float32Array;
@@ -247,6 +252,10 @@ export function initializeState(): void {
   influenceMap = new Int16Array(new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS * 2));
   territoryOwnerMap = new Int32Array(new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS * 4));
 
+  groupHouseCapacity = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
+  starvingGroups = new Uint8Array(new SharedArrayBuffer(C.MAX_GROUPS));
+  flowQueue = new Uint32Array(new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS * 4));
+
   // Buildings
   bldPositionX = new Float32Array(new SharedArrayBuffer(C.MAX_BUILDINGS * 4));
   bldPositionY = new Float32Array(new SharedArrayBuffer(C.MAX_BUILDINGS * 4));
@@ -360,6 +369,9 @@ export function mapStateBuffers(buffers: any): void {
   groupMagicFrequency = new Int8Array(buffers.groupMagicFrequency);
   influenceMap = new Int16Array(buffers.influenceMap);
   territoryOwnerMap = new Int32Array(buffers.territoryOwnerMap);
+  groupHouseCapacity = new Int32Array(buffers.groupHouseCapacity);
+  starvingGroups = new Uint8Array(buffers.starvingGroups);
+  flowQueue = new Uint32Array(buffers.flowQueue);
   logicBytecode = new Int32Array(buffers.logicBytecode);
   workerSync = new Int32Array(buffers.workerSync);
 
@@ -395,6 +407,10 @@ export function mapStateBuffers(buffers: any): void {
   itemInstanceX = new Float32Array(buffers.itemInstanceX);
   itemInstanceY = new Float32Array(buffers.itemInstanceY);
 
+  itemSpatialHead = new Int32Array(buffers.itemSpatialHead);
+  itemSpatialNext = new Int32Array(buffers.itemSpatialNext);
+  targetItemId = new Int32Array(buffers.targetItemId);
+
   playerTargetX = new Float32Array(buffers.playerTargetX);
   playerTargetY = new Float32Array(buffers.playerTargetY);
 
@@ -428,5 +444,8 @@ function initializeLocalState(): void {
   vehSpatialNext.fill(-1);
 
   integrationField = new Float32Array(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS);
+  settlementTimerMap = new Int16Array(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS);
+}
+ROWS);
   settlementTimerMap = new Int16Array(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS);
 }

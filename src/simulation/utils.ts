@@ -351,9 +351,9 @@ export function sendEventToGroup(groupId: number, eventType: number): number {
  */
 export function createItemInstance(defId: number, ownerType: number, x: number, y: number, ownerId: number = -1): number {
   for (let i = 0; i < C.MAX_ITEM_INSTANCES; i++) {
-    if (S.itemInstanceOwnerType[i] === 0) { // 0 = Inactive
+    // ATOMIC CHECK: Ensure slot is inactive
+    if (Atomics.compareExchange(S.itemInstanceOwnerType, i, C.OWNER_TYPE_INACTIVE, ownerType) === C.OWNER_TYPE_INACTIVE) {
       S.itemInstanceDefId[i] = defId;
-      S.itemInstanceOwnerType[i] = ownerType;
       S.itemInstanceOwnerId[i] = ownerId;
       S.itemInstanceX[i] = x;
       S.itemInstanceY[i] = y;

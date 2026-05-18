@@ -16,7 +16,7 @@ export function SummarySystem(): void {
   S.groupMisc.fill(0);
   let totalActive = 0;
   
-  const groupHouseCapacity = new Int32Array(C.MAX_GROUPS);
+  S.groupHouseCapacity.fill(0);
 
   // Phase 23: National Cohesion System
   // Update cohesion for all active groups
@@ -73,16 +73,16 @@ export function SummarySystem(): void {
           S.groupWood[gid] += S.bldDataA[b];
           S.groupGold[gid] += S.bldDataB[b];
           S.groupFood[gid] += S.bldDataC[b];
-          groupHouseCapacity[gid] += 20; // Base warehouse capacity
+          S.groupHouseCapacity[gid] += 20; // Base warehouse capacity
         } else if (S.bldType[b] === C.BuildingType.House) {
-          groupHouseCapacity[gid] += S.bldDataB[b];
+          S.groupHouseCapacity[gid] += S.bldDataB[b];
         }
       }
     }
   }
 
   // Food consumption - only food matters for survival, not wealth
-  const starvingGroups = new Uint8Array(C.MAX_GROUPS);
+  S.starvingGroups.fill(0);
   for (let g = 0; g < C.MAX_GROUPS; g++) {
     const pop = S.groupPopulationCount[g];
     if (pop === 0) continue;
@@ -96,7 +96,7 @@ export function SummarySystem(): void {
       S.groupFood[g] -= foodRequired;
     } else {
       S.groupFood[g] = 0;
-      starvingGroups[g] = 1;
+      S.starvingGroups[g] = 1;
     }
   }
 
@@ -111,7 +111,7 @@ export function SummarySystem(): void {
     const needsSafetySpawn = g < 4 && pop < 20;
     
     // House capacity calculated from polymorphic registers
-    const houseCapacity = Math.max(20, groupHouseCapacity[g]);
+    const houseCapacity = Math.max(20, S.groupHouseCapacity[g]);
 
     // Only allow reproduction if the group has capacity and wealth
     const canAffordReproduction = pop > 0 && pop < houseCapacity && wealth > 1000;    
@@ -158,7 +158,7 @@ export function SummarySystem(): void {
   for (let i = 0; i < C.MAX_ENTITIES; i++) {
     if (S.state[i] === C.EntityState.Dead) continue;
     const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS + 0]; // Check slot 0
-    if (gid >= 0 && gid < C.MAX_GROUPS && starvingGroups[gid] === 1) {
+    if (gid >= 0 && gid < C.MAX_GROUPS && S.starvingGroups[gid] === 1) {
       S.health[i] -= 10; // Fast death if group is broke
     }
   }
@@ -233,6 +233,103 @@ export function EvaluateScenarioMilestones(): void {
     self.postMessage({ type: "SCENARIO_COMPLETE" });
     // Reset target to prevent duplicate messages
     S.scenarioState[1] = 0;
+  }
+}
+
+/**
+ * Phase 26: Rule Action Execution Handler
+ * Triggers physical or diplomatic effects from the Rule Engine
+ */
+function ExecuteRuleAction(groupId: number, actionType: number): void {
+  switch (actionType) {
+    case C.ACTION_SPAWN_DEFENSE_PROJECTILE: {
+      // 1. Locate an inactive projectile slot
+      let pIdx = -1;
+      for (let p = 0; p < C.MAX_PROJECTILES; p++) {
+        if (S.projType[p] === 0) {
+          pIdx = p;
+          break;
+        }
+      }
+      if (pIdx === -1) break;
+
+      // 2. Find a hostile target group
+      let enemyGroupId = -1;
+      for (let otherG = 0; otherG < C.MAX_GROUPS; otherG++) {
+        if (otherG === groupId || S.groupPopulationCount[otherG] === 0) continue;
+        if (S.groupRelationsMatrix[groupId * C.MAX_GROUPS + otherG] <= -50) {
+          enemyGroupId = otherG;
+          break;
+        }
+      }
+      if (enemyGroupId === -1) break;
+
+      // 3. Calculate vector from warehouse origin to enemy warehouse
+      const originX = S.groupWarehouseX[groupId];
+      const originY = S.groupWarehouseY[groupId];
+      const targetX = S.groupWarehouseX[enemyGroupId];
+      const targetY = S.groupWarehouseY[enemyGroupId];
+      
+      let dx = targetX - originX;
+      let dy = targetY - originY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 0) {
+        dx /= dist;
+        dy /= dist;
+      }
+      
+      const speed = 5.0;
+      const vecX = dx * speed;
+      const vecY = dy * speed;
+
+      // 4. Assign projectile data
+      S.projType[pIdx] = C.PROJ_TYPE_FIREBALL;
+      S.projPositionX[pIdx] = originX;
+      S.projPositionY[pIdx] = originY;
+      S.projVelocityX[pIdx] = vecX;
+      S.projVelocityY[pIdx] = vecY;
+      S.projLifeTime[pIdx] = 300;
+      S.projOwnerGroup[pIdx] = groupId;
+      break;
+    }
+
+    case C.ACTION_DECLARE_WAR: {
+      // 1. Find a random neutral or allied group
+      const potentialTargets: number[] = [];
+      for (let otherG = 0; otherG < C.MAX_GROUPS; otherG++) {
+        if (otherG === groupId || S.groupPopulationCount[otherG] === 0) continue;
+        if (S.groupRelationsMatrix[groupId * C.MAX_GROUPS + otherG] > -50) {
+          potentialTargets.push(otherG);
+        }
+      }
+      
+      if (potentialTargets.length === 0) break;
+      const targetGid = potentialTargets[Math.floor(Math.random() * potentialTargets.length)];
+
+      // 2. Set bilateral relation matrix to -100 (Instant hostility)
+      S.groupRelationsMatrix[groupId * C.MAX_GROUPS + targetGid] = -100;
+      S.groupRelationsMatrix[targetGid * C.MAX_GROUPS + groupId] = -100;
+
+      // 3. Trigger immediate military invasion
+      let warehouseBldIdx = -1;
+      for (let b = 0; b < C.MAX_BUILDINGS; b++) {
+        if (S.bldType[b] === C.BuildingType.Warehouse && S.bldOwnerGroup[b] === targetGid) {
+          warehouseBldIdx = b;
+          break;
+        }
+      }
+      
+      S.groupTargetEntityId[groupId] = warehouseBldIdx;
+      const tx = S.groupWarehouseX[targetGid];
+      const ty = S.groupWarehouseY[targetGid];
+      S.groupTargetX[groupId] = tx;
+      S.groupTargetY[groupId] = ty;
+      S.groupTargetAge[groupId] = 0;
+      
+      // Force all idle citizens to move to combat state
+      U.broadcastGroupCommand(groupId, C.EntityState.Combat, tx, ty);
+      break;
+    }
   }
 }
 
@@ -338,7 +435,9 @@ export function RuleEvaluationSystem(): void {
 
     if (conditionMet) {
       if (actionState === 99) self.postMessage({ type: "SAVE_REQUEST" });
-      else {
+      else if (actionState === C.ACTION_SPAWN_DEFENSE_PROJECTILE || actionState === C.ACTION_DECLARE_WAR) {
+        ExecuteRuleAction(subjectId, actionState);
+      } else {
         U.broadcastGroupCommand(subjectId, actionState, targetX, targetY);
         if (firstActiveLocationTargetX === -1) { firstActiveLocationTargetX = targetX; firstActiveLocationTargetY = targetY; }
       }
@@ -364,11 +463,14 @@ export function updateFlowField(targetX: number, targetY: number): void {
   S.integrationField.fill(65535);
   const targetIdx = targetTileY * C.WORLD_MAP_COLS + targetTileX;
   S.integrationField[targetIdx] = 0;
-  const queue: number[] = [targetIdx];
+  
+  // Use pre-allocated flowQueue and head/tail pointers to avoid GC
   let head = 0;
+  let tail = 0;
+  S.flowQueue[tail++] = targetIdx;
 
-  while (head < queue.length) {
-    const currIdx = queue[head++];
+  while (head < tail) {
+    const currIdx = S.flowQueue[head++];
     const currX = currIdx % C.WORLD_MAP_COLS;
     const currY = Math.floor(currIdx / C.WORLD_MAP_COLS);
     const currCost = S.integrationField[currIdx];
@@ -383,7 +485,10 @@ export function updateFlowField(targetX: number, targetY: number): void {
           if (terrain === 1) stepCost *= 3;
           if (terrain === 2) stepCost = 255;
           const totalCost = currCost + stepCost;
-          if (totalCost < S.integrationField[nIdx]) { S.integrationField[nIdx] = totalCost; queue.push(nIdx); }
+          if (totalCost < S.integrationField[nIdx]) { 
+            S.integrationField[nIdx] = totalCost; 
+            if (tail < S.flowQueue.length) S.flowQueue[tail++] = nIdx;
+          }
         }
       }
     }

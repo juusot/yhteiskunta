@@ -4,7 +4,7 @@ import React from 'react';
 import { App } from './App';
 import { writeFile, readFile } from '@tauri-apps/plugin-fs';
 import { save, open } from '@tauri-apps/plugin-dialog';
-import { MAX_ENTITIES, MAX_GROUPS, WORLD_MAP_COLS as MAP_COLS, WORLD_MAP_ROWS as MAP_ROWS, MAX_BUILDINGS, MAX_VEHICLES } from './simulation/constants';
+import { MAX_ENTITIES, MAX_GROUPS, WORLD_MAP_COLS as MAP_COLS, WORLD_MAP_ROWS as MAP_ROWS, MAX_BUILDINGS, MAX_VEHICLES, MAX_PROJECTILES, MAX_ITEM_INSTANCES } from './simulation/constants';
 
 console.log("Main script loading...");
 
@@ -349,11 +349,70 @@ window.addEventListener('DOMContentLoaded', () => {
     out vec4 outColor;
     void main() { outColor = vec4(1.0, 1.0, 1.0, 1.0); }`;
 
+    const PROJ_VS = `#version 300 es
+    layout(location = 0) in vec2 a_pos;
+    layout(location = 1) in float i_posX;
+    layout(location = 2) in float i_posY;
+    layout(location = 3) in float i_type;
+    uniform vec2 u_resolution;
+    uniform vec4 u_camera;
+    out float v_type;
+    void main() {
+        if (i_type == 0.0) { gl_Position = vec4(-10.0, -10.0, 0.0, 1.0); return; }
+        vec2 worldPos = vec2(i_posX, i_posY);
+        vec2 screenPos = (worldPos - u_camera.xy) * u_camera.z;
+        vec2 clipPos = (screenPos / u_resolution) * 2.0 - 1.0;
+        clipPos.y = -clipPos.y;
+        float size = (i_type == 2.0) ? 3.0 : 1.5; // Fireball is bigger
+        gl_Position = vec4(clipPos + (a_pos * size * u_camera.z / u_resolution), 0.0, 1.0);
+        v_type = i_type;
+    }`;
+
+    const PROJ_FS = `#version 300 es
+    precision highp float;
+    in float v_type;
+    out vec4 outColor;
+    void main() {
+        if (v_type == 1.0) outColor = vec4(0.2, 0.2, 0.2, 1.0); // Arrow
+        else if (v_type == 2.0) outColor = vec4(1.0, 0.5, 0.0, 1.0); // Fireball
+        else outColor = vec4(1.0, 1.0, 1.0, 1.0);
+    }`;
+
+    const ITEM_VS = `#version 300 es
+    layout(location = 0) in vec2 a_pos;
+    layout(location = 1) in float i_posX;
+    layout(location = 2) in float i_posY;
+    layout(location = 3) in float i_ownerType;
+    layout(location = 4) in float i_defId;
+    uniform vec2 u_resolution;
+    uniform vec4 u_camera;
+    out float v_defId;
+    void main() {
+        if (i_ownerType != 1.0) { gl_Position = vec4(-10.0, -10.0, 0.0, 1.0); return; }
+        vec2 worldPos = vec2(i_posX, i_posY);
+        vec2 screenPos = (worldPos - u_camera.xy) * u_camera.z;
+        vec2 clipPos = (screenPos / u_resolution) * 2.0 - 1.0;
+        clipPos.y = -clipPos.y;
+        gl_Position = vec4(clipPos + (a_pos * 2.0 * u_camera.z / u_resolution), 0.0, 1.0);
+        v_defId = i_defId;
+    }`;
+
+    const ITEM_FS = `#version 300 es
+    precision highp float;
+    in float v_defId;
+    out vec4 outColor;
+    void main() {
+        if (v_defId == 2.0) outColor = vec4(0.5, 0.0, 0.0, 1.0); // Cursed Blade
+        else outColor = vec4(0.0, 0.5, 0.5, 1.0);
+    }`;
+
     const tileProg = createProgram(gl, TILE_VS, TILE_FS);
     const infProg = createProgram(gl, INF_VS, INF_FS);
     const entProg = createProgram(gl, ENTITY_VS, ENTITY_FS);
     const bldProg = createProgram(gl, BLD_VS, BLD_FS);
     const vehProg = createProgram(gl, VEH_VS, VEH_FS);
+    const projProg = createProgram(gl, PROJ_VS, PROJ_FS);
+    const itemProg = createProgram(gl, ITEM_VS, ITEM_FS);
 
     const quadData = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
     const quadVbo = gl.createBuffer();
@@ -370,6 +429,7 @@ window.addEventListener('DOMContentLoaded', () => {
     let vehPositionX: Float32Array, vehPositionY: Float32Array, vehType: Uint8Array, vehOwnerGroup: Int32Array;
     let playerTargetX: Float32Array, playerTargetY: Float32Array, scenarioState: Int32Array;
     let projPositionX: Float32Array, projPositionY: Float32Array, projType: Uint8Array, projLifeTime: Int16Array;
+    let itemInstanceX: Float32Array, itemInstanceY: Float32Array, itemInstanceOwnerType: Uint8Array, itemInstanceDefId: Uint16Array;
 
     // VAOs
     const tileVao = gl.createVertexArray(); gl.bindVertexArray(tileVao);
@@ -390,7 +450,22 @@ window.addEventListener('DOMContentLoaded', () => {
     const instPosXVbo = gl.createBuffer(), instPosYVbo = gl.createBuffer(), instTypeVbo = gl.createBuffer(), instGroupVbo = gl.createBuffer(), instHealthVbo = gl.createBuffer();
     const bldPosXVbo = gl.createBuffer(), bldPosYVbo = gl.createBuffer(), bldTypeVbo = gl.createBuffer(), bldGroupVbo = gl.createBuffer(), bldHealthVbo = gl.createBuffer();
     const vehPosXVbo = gl.createBuffer(), vehPosYVbo = gl.createBuffer(), vehTypeVbo = gl.createBuffer(), vehGroupVbo = gl.createBuffer();
+    const projPosXVbo = gl.createBuffer(), projPosYVbo = gl.createBuffer(), projTypeVbo = gl.createBuffer();
+    const itemPosXVbo = gl.createBuffer(), itemPosYVbo = gl.createBuffer(), itemOwnerTypeVbo = gl.createBuffer(), itemDefIdVbo = gl.createBuffer();
     const tileTypeVbo = gl.createBuffer(), infOwnerVbo = gl.createBuffer(), infStrengthVbo = gl.createBuffer(), infBorderVbo = gl.createBuffer();
+
+    const projVao = gl.createVertexArray(); gl.bindVertexArray(projVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadVbo); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, projPosXVbo); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(1, 1);
+    gl.bindBuffer(gl.ARRAY_BUFFER, projPosYVbo); gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(2, 1);
+    gl.bindBuffer(gl.ARRAY_BUFFER, projTypeVbo); gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 1, gl.UNSIGNED_BYTE, false, 0, 0); gl.vertexAttribDivisor(3, 1);
+
+    const itemVao = gl.createVertexArray(); gl.bindVertexArray(itemVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadVbo); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, itemPosXVbo); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(1, 1);
+    gl.bindBuffer(gl.ARRAY_BUFFER, itemPosYVbo); gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(2, 1);
+    gl.bindBuffer(gl.ARRAY_BUFFER, itemOwnerTypeVbo); gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 1, gl.UNSIGNED_BYTE, false, 0, 0); gl.vertexAttribDivisor(3, 1);
+    gl.bindBuffer(gl.ARRAY_BUFFER, itemDefIdVbo); gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 1, gl.UNSIGNED_SHORT, false, 0, 0); gl.vertexAttribDivisor(4, 1);
 
     const tileTypeBuffer = new Float32Array(MAP_COLS * MAP_ROWS), infOwnerBuffer = new Float32Array(MAP_COLS * MAP_ROWS), infStrengthBuffer = new Float32Array(MAP_COLS * MAP_ROWS), infBorderBuffer = new Float32Array(MAP_COLS * MAP_ROWS);
 
@@ -399,6 +474,21 @@ window.addEventListener('DOMContentLoaded', () => {
     let inspectEntityId = -1, followEntityId = -1, tickCount = 0;
     let lastTickDuration = 0, avgTickDuration = 0, tickTimes: number[] = [], chronicle: string[] = [];
     let isTickInProgress = false, completedWorkersThisTick = 0, lastTickStartTime = 0;
+
+    // PRE-ALLOCATED BUFFERS FOR RENDERING (Eliminates GC triggers in hot loop)
+    const uCam = new Float32Array([0, 0, 0, 0]);
+    const uRes = new Float32Array([canvas.width, canvas.height]);
+
+    // CACHED UNIFORM LOCATIONS
+    const locs = {
+        tile: { res: gl.getUniformLocation(tileProg, 'u_resolution'), cam: gl.getUniformLocation(tileProg, 'u_camera') },
+        inf: { res: gl.getUniformLocation(infProg, 'u_resolution'), cam: gl.getUniformLocation(infProg, 'u_camera'), zoom: gl.getUniformLocation(infProg, 'u_zoom') },
+        ent: { res: gl.getUniformLocation(entProg, 'u_resolution'), cam: gl.getUniformLocation(entProg, 'u_camera') },
+        bld: { res: gl.getUniformLocation(bldProg, 'u_resolution'), cam: gl.getUniformLocation(bldProg, 'u_camera') },
+        veh: { res: gl.getUniformLocation(vehProg, 'u_resolution'), cam: gl.getUniformLocation(vehProg, 'u_camera') },
+        proj: { res: gl.getUniformLocation(projProg, 'u_resolution'), cam: gl.getUniformLocation(projProg, 'u_camera') },
+        item: { res: gl.getUniformLocation(itemProg, 'u_resolution'), cam: gl.getUniformLocation(itemProg, 'u_camera') }
+    };
 
     function addChronicle(msg: string) {
         chronicle.unshift(`[Tick ${tickCount}] ${msg}`);
@@ -515,14 +605,15 @@ window.addEventListener('DOMContentLoaded', () => {
           cameraY = positionY[followEntityId] - (canvas.height / 2) / zoom;
         }
         
-        const uCam = [cameraX, cameraY, zoom, 0], uRes = [canvas.width, canvas.height];
+        uCam[0] = cameraX; uCam[1] = cameraY; uCam[2] = zoom; uCam[3] = 0;
+        uRes[0] = canvas.width; uRes[1] = canvas.height;
 
         // ============================================================
         // RENDER LAYER 1: Background Terrain Tiles (worldMap)
         // Draw base terrain: grass, forest, water, mountains
         // ============================================================
         gl.useProgram(tileProg);
-        gl.uniform2fv(gl.getUniformLocation(tileProg, 'u_resolution'), uRes); gl.uniform4fv(gl.getUniformLocation(tileProg, 'u_camera'), uCam);
+        gl.uniform2fv(locs.tile.res, uRes); gl.uniform4fv(locs.tile.cam, uCam);
         for(let i=0; i<MAP_COLS*MAP_ROWS; i++) tileTypeBuffer[i] = worldMap[i];
         gl.bindBuffer(gl.ARRAY_BUFFER, tileTypeVbo); gl.bufferData(gl.ARRAY_BUFFER, tileTypeBuffer, gl.DYNAMIC_DRAW);
         gl.bindVertexArray(tileVao); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(1, 1);
@@ -536,8 +627,8 @@ window.addEventListener('DOMContentLoaded', () => {
           gl.enable(gl.BLEND);
           gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
           gl.useProgram(infProg);
-          gl.uniform2fv(gl.getUniformLocation(infProg, 'u_resolution'), uRes); gl.uniform4fv(gl.getUniformLocation(infProg, 'u_camera'), uCam);
-          gl.uniform1f(gl.getUniformLocation(infProg, 'u_zoom'), zoom);
+          gl.uniform2fv(locs.inf.res, uRes); gl.uniform4fv(locs.inf.cam, uCam);
+          gl.uniform1f(locs.inf.zoom, zoom);
           
           // Compute borders: detect where ownership changes between neighbors
           const showBorders = false; // Temporarily disabled for testing
@@ -578,7 +669,7 @@ window.addEventListener('DOMContentLoaded', () => {
         // ============================================================
         if (bldPositionX) {
           gl.useProgram(bldProg);
-          gl.uniform2fv(gl.getUniformLocation(bldProg, 'u_resolution'), uRes); gl.uniform4fv(gl.getUniformLocation(bldProg, 'u_camera'), uCam);
+          gl.uniform2fv(locs.bld.res, uRes); gl.uniform4fv(locs.bld.cam, uCam);
           gl.bindVertexArray(bldVao);
           gl.bindBuffer(gl.ARRAY_BUFFER, bldPosXVbo); gl.bufferData(gl.ARRAY_BUFFER, bldPositionX, gl.DYNAMIC_DRAW);
           gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(1, 1);
@@ -598,7 +689,7 @@ window.addEventListener('DOMContentLoaded', () => {
         // Trees, bushes, gold, loot, characters - drawn on top of buildings
         // ============================================================
         gl.useProgram(entProg);
-        gl.uniform2fv(gl.getUniformLocation(entProg, 'u_resolution'), uRes); gl.uniform4fv(gl.getUniformLocation(entProg, 'u_camera'), uCam);
+        gl.uniform2fv(locs.ent.res, uRes); gl.uniform4fv(locs.ent.cam, uCam);
         gl.bindVertexArray(entVao);
         gl.bindBuffer(gl.ARRAY_BUFFER, instPosXVbo); gl.bufferData(gl.ARRAY_BUFFER, positionX, gl.DYNAMIC_DRAW);
         gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(1, 1);
@@ -618,7 +709,7 @@ window.addEventListener('DOMContentLoaded', () => {
         // ============================================================
         if (vehPositionX) {
           gl.useProgram(vehProg);
-          gl.uniform2fv(gl.getUniformLocation(vehProg, 'u_resolution'), uRes); gl.uniform4fv(gl.getUniformLocation(vehProg, 'u_camera'), uCam);
+          gl.uniform2fv(locs.veh.res, uRes); gl.uniform4fv(locs.veh.cam, uCam);
           gl.bindVertexArray(vehVao);
           gl.bindBuffer(gl.ARRAY_BUFFER, vehPosXVbo); gl.bufferData(gl.ARRAY_BUFFER, vehPositionX, gl.DYNAMIC_DRAW);
           gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(1, 1);
@@ -632,7 +723,36 @@ window.addEventListener('DOMContentLoaded', () => {
         }
 
         // ============================================================
-        // RENDER LAYER 6: UI Panels, Text, Selection Indicators
+        // RENDER LAYER 6: Projectiles (arrows, fireballs)
+        // ============================================================
+        if (projPositionX) {
+          gl.useProgram(projProg);
+          gl.uniform2fv(locs.proj.res, uRes);
+          gl.uniform4fv(locs.proj.cam, uCam);
+          gl.bindVertexArray(projVao);
+          gl.bindBuffer(gl.ARRAY_BUFFER, projPosXVbo); gl.bufferData(gl.ARRAY_BUFFER, projPositionX, gl.DYNAMIC_DRAW);
+          gl.bindBuffer(gl.ARRAY_BUFFER, projPosYVbo); gl.bufferData(gl.ARRAY_BUFFER, projPositionY, gl.DYNAMIC_DRAW);
+          gl.bindBuffer(gl.ARRAY_BUFFER, projTypeVbo); gl.bufferData(gl.ARRAY_BUFFER, projType, gl.DYNAMIC_DRAW);
+          gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, MAX_PROJECTILES);
+        }
+
+        // ============================================================
+        // RENDER LAYER 7: Ground Items (loot, equipment)
+        // ============================================================
+        if (itemInstanceX) {
+          gl.useProgram(itemProg);
+          gl.uniform2fv(locs.item.res, uRes);
+          gl.uniform4fv(locs.item.cam, uCam);
+          gl.bindVertexArray(itemVao);
+          gl.bindBuffer(gl.ARRAY_BUFFER, itemPosXVbo); gl.bufferData(gl.ARRAY_BUFFER, itemInstanceX, gl.DYNAMIC_DRAW);
+          gl.bindBuffer(gl.ARRAY_BUFFER, itemPosYVbo); gl.bufferData(gl.ARRAY_BUFFER, itemInstanceY, gl.DYNAMIC_DRAW);
+          gl.bindBuffer(gl.ARRAY_BUFFER, itemOwnerTypeVbo); gl.bufferData(gl.ARRAY_BUFFER, itemInstanceOwnerType, gl.DYNAMIC_DRAW);
+          gl.bindBuffer(gl.ARRAY_BUFFER, itemDefIdVbo); gl.bufferData(gl.ARRAY_BUFFER, itemInstanceDefId, gl.DYNAMIC_DRAW);
+          gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, MAX_ITEM_INSTANCES);
+        }
+
+        // ============================================================
+        // RENDER LAYER 8: UI Panels, Text, Selection Indicators
         // (Handled by React/App.tsx overlay - rendered via DOM)
         // ============================================================
         
@@ -677,6 +797,7 @@ window.addEventListener('DOMContentLoaded', () => {
           vehPositionX = new Float32Array(buffers.vehPositionX); vehPositionY = new Float32Array(buffers.vehPositionY); vehType = new Uint8Array(buffers.vehType); vehOwnerGroup = new Int32Array(buffers.vehOwnerGroup);
           playerTargetX = new Float32Array(buffers.playerTargetX); playerTargetY = new Float32Array(buffers.playerTargetY); scenarioState = new Int32Array(buffers.scenarioState);
           projPositionX = new Float32Array(buffers.projPositionX); projPositionY = new Float32Array(buffers.projPositionY); projType = new Uint8Array(buffers.projType); projLifeTime = new Int16Array(buffers.projLifeTime);
+          itemInstanceX = new Float32Array(buffers.itemInstanceX); itemInstanceY = new Float32Array(buffers.itemInstanceY); itemInstanceOwnerType = new Uint8Array(buffers.itemInstanceOwnerType); itemInstanceDefId = new Uint16Array(buffers.itemInstanceDefId);
           workers.slice(1).forEach((sw, si) => sw.postMessage({ type: "INIT", payload: { quadrantIndex: si + 1, buffers } }));
           requestAnimationFrame(render); setInterval(syncReact, 200);
           startTick();

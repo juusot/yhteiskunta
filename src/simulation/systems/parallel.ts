@@ -2,6 +2,7 @@
 import * as C from '../constants';
 import * as S from '../state';
 import * as U from '../utils';
+import * as B from '../buffs';
 
 /**
  * Spatial Update System - Phase 2
@@ -15,6 +16,7 @@ export function SpatialUpdateSystem(): void {
     S.spatialHead.fill(-1);
     S.bldSpatialHead.fill(-1);
     S.vehSpatialHead.fill(-1);
+    S.itemSpatialHead.fill(-1);
   }
   
   // Wait for clear
@@ -63,6 +65,19 @@ export function SpatialUpdateSystem(): void {
     if (tx >= 0 && tx < C.GRID_COLS && ty >= 0 && ty < C.GRID_ROWS) {
       const cellIdx = ty * C.GRID_COLS + tx;
       S.vehSpatialNext[i] = Atomics.exchange(S.vehSpatialHead, cellIdx, i);
+    }
+  }
+
+  // Ground Items
+  for (let i = 0; i < C.MAX_ITEM_INSTANCES; i++) {
+    if (S.itemInstanceOwnerType[i] !== C.OWNER_TYPE_GROUND) continue;
+    if (S.itemInstanceX[i] < S.minX || S.itemInstanceX[i] > S.maxX || S.itemInstanceY[i] < S.minY || S.itemInstanceY[i] > S.maxY) continue;
+
+    const tx = Math.floor(S.itemInstanceX[i] / C.GRID_SIZE);
+    const ty = Math.floor(S.itemInstanceY[i] / C.GRID_SIZE);
+    if (tx >= 0 && tx < C.GRID_COLS && ty >= 0 && ty < C.GRID_ROWS) {
+      const cellIdx = ty * C.GRID_COLS + tx;
+      S.itemSpatialNext[i] = Atomics.exchange(S.itemSpatialHead, cellIdx, i);
     }
   }
 }
@@ -120,6 +135,8 @@ export function LifeSystem(): void {
       S.positionX[i] = -10000;
       S.positionY[i] = -10000;
       S.health[i] = 0;
+      S.isMounted[i] = 0;
+      S.targetVehicleId[i] = -1;
       if (gid !== -1) Atomics.sub(S.groupPopulationCount, gid, 1);
     }
   }
@@ -200,9 +217,12 @@ export function AutonomySystem(): void {
               const buildX = S.groupWarehouseX[gid] + (Math.random() - 0.5) * 100;
               const buildY = S.groupWarehouseY[gid] + (Math.random() - 0.5) * 100;
               if (U.isInGroupInfluence(buildX, buildY, gid)) {
-                S.bldType[b] = C.BuildingType.Field; S.bldPositionX[b] = buildX; S.bldPositionY[b] = buildY; S.bldHealth[b] = 50; S.bldOwnerGroup[b] = gid; S.bldTier[b] = C.BLD_TIER_1; S.bldDataA[b] = 0; S.bldDataB[b] = 0; S.bldDataC[b] = 0;
-                S.targetBuildingId[i] = b; S.state[i] = C.EntityState.Construction; S.actionTimer[i] = 120;
-                Atomics.add(S.groupBuildingCount, gid, 1); Atomics.sub(S.groupTotalWealth, gid, 200); fieldBuilt = true;
+                // ATOMIC CHECK: Ensure slot is still empty
+                if (Atomics.compareExchange(S.bldType, b, 0, C.BuildingType.Field) === 0) {
+                  S.bldPositionX[b] = buildX; S.bldPositionY[b] = buildY; S.bldHealth[b] = 50; S.bldOwnerGroup[b] = gid; S.bldTier[b] = C.BLD_TIER_1; S.bldDataA[b] = 0; S.bldDataB[b] = 0; S.bldDataC[b] = 0;
+                  S.targetBuildingId[i] = b; S.state[i] = C.EntityState.Construction; S.actionTimer[i] = 120;
+                  Atomics.add(S.groupBuildingCount, gid, 1); Atomics.sub(S.groupTotalWealth, gid, 200); fieldBuilt = true;
+                }
               }
             }
             if (fieldBuilt) break;
@@ -211,6 +231,34 @@ export function AutonomySystem(): void {
         }
       }
     }
+
+    // === PRIORITY 5: IDLE & LOOTING DISCOVERY ===
+    if (S.tickCount % (60 + (i % 30)) === 0) {
+      const tx = Math.floor(S.positionX[i] / C.GRID_SIZE);
+      const ty = Math.floor(S.positionY[i] / C.GRID_SIZE);
+      if (tx >= 0 && tx < C.GRID_COLS && ty >= 0 && ty < C.GRID_ROWS) {
+        const cellIdx = ty * C.GRID_COLS + tx;
+        let itemId = S.itemSpatialHead[cellIdx];
+        let safety = 0;
+        while (itemId !== -1 && safety++ < 64) {
+          if (itemId >= 0 && itemId < C.MAX_ITEM_INSTANCES) {
+            const defId = S.itemInstanceDefId[itemId];
+            if (defId >= 0 && defId < C.MAX_ITEM_DEFINITIONS) {
+              const baseType = S.itemDefBaseType[defId];
+              if (baseType === C.ITEM_BASE_MELEE) {
+                if (S.charWeapon[i] === -1 || S.itemDefStatA[defId] > S.effectiveDamage[i]) {
+                  S.targetItemId[i] = itemId;
+                  S.state[i] = C.EntityState.Looting;
+                  break;
+                }
+              }
+            }
+          }
+          itemId = S.itemSpatialNext[itemId];
+        }
+      }
+    }
+    if (S.state[i] === C.EntityState.Looting) continue;
 
     S.state[i] = C.EntityState.Idle; S.actionTimer[i] = 60 + (i % 60); S.targetEntityId[i] = -1; S.targetBuildingId[i] = -1;
   }
@@ -325,6 +373,30 @@ export function SteeringSystem(): void {
       const dx = tx - S.positionX[i], dy = ty - S.positionY[i];
       const distSq = dx * dx + dy * dy;
       if (distSq > 1.0) { const dist = Math.sqrt(distSq); S.velocityX[i] = (dx / dist) * 1.8; S.velocityY[i] = (dy / dist) * 1.8; }
+    } else if (S.state[i] === C.EntityState.Looting) {
+      const targetItem = S.targetItemId[i];
+      if (targetItem === -1 || targetItem >= C.MAX_ITEM_INSTANCES || S.itemInstanceOwnerType[targetItem] !== C.OWNER_TYPE_GROUND) { 
+        S.state[i] = C.EntityState.Idle; S.targetItemId[i] = -1; continue; 
+      }
+      const dx = S.itemInstanceX[targetItem] - S.positionX[i], dy = S.itemInstanceY[targetItem] - S.positionY[i];
+      const distSq = dx * dx + dy * dy;
+      if (distSq > 4.0) {
+        const dist = Math.sqrt(distSq);
+        const speed = S.effectiveSpeed[i] || 1.8;
+        S.velocityX[i] = (dx / dist) * speed;
+        S.velocityY[i] = (dy / dist) * speed;
+      } else {
+        // ATOMIC CHECK: Ensure item is still on ground
+        if (Atomics.compareExchange(S.itemInstanceOwnerType, targetItem, C.OWNER_TYPE_GROUND, C.OWNER_TYPE_CHARACTER) === C.OWNER_TYPE_GROUND) {
+          if (S.charWeapon[i] !== -1) { U.setItemInstanceGround(S.charWeapon[i], S.positionX[i], S.positionY[i]); }
+          S.itemInstanceOwnerId[targetItem] = i;
+          S.charWeapon[i] = targetItem; S.targetItemId[i] = -1; S.state[i] = C.EntityState.Idle;
+          B.ApplyEquipmentModifiers(i);
+        } else {
+          // Lost the race to another entity
+          S.state[i] = C.EntityState.Idle; S.targetItemId[i] = -1;
+        }
+      }
     }
 
     if ((S.traitBitmask[i] & C.TRAIT_SCOUT) !== 0 && S.state[i] === C.EntityState.Idle) {
