@@ -47,12 +47,39 @@ export function initializeWorld(): void {
   // Reset Buildings
   for (let i = 0; i < C.MAX_BUILDINGS; i++) {
     S.bldType[i] = 0; S.bldHealth[i] = 0; S.bldOwnerGroup[i] = -1;
-    for (let j = 0; j < 4; j++) S.bldInventory[i * 4 + j] = 0;
+    S.bldDataA[i] = 0;
+    S.bldDataB[i] = 0;
+    S.bldDataC[i] = 0;
   }
   // Reset Vehicles
   for (let i = 0; i < C.MAX_VEHICLES; i++) {
     S.vehType[i] = 0; S.vehHealth[i] = 0; S.vehPilotId[i] = -1; S.vehOwnerGroup[i] = -1;
   }
+  
+  // Reset Items
+  for (let i = 0; i < C.MAX_ITEM_INSTANCES; i++) {
+    S.itemInstanceOwnerType[i] = C.OWNER_TYPE_INACTIVE;
+  }
+
+  // Pre-populate Item Definitions
+  // Index 0: Standard Sword
+  S.itemDefBaseType[0] = C.ITEM_BASE_MELEE;
+  S.itemDefStatA[0] = 15;
+  S.itemDefStatB[0] = 30;
+  S.itemDefTraitMask[0] = C.ITEM_TRAIT_NONE;
+
+  // Index 1: Health Potion
+  S.itemDefBaseType[1] = C.ITEM_BASE_CONSUMABLE;
+  S.itemDefStatA[1] = 50;
+  S.itemDefStatB[1] = 0;
+  S.itemDefTraitMask[1] = C.ITEM_TRAIT_NONE;
+
+  // Index 2: Cursed Blade
+  S.itemDefBaseType[2] = C.ITEM_BASE_MELEE;
+  S.itemDefStatA[2] = 40;
+  S.itemDefStatB[2] = 25;
+  S.itemDefTraitMask[2] = C.ITEM_TRAIT_CURSED;
+
   // Reset Groups
   for (let g = 0; g < C.MAX_GROUPS; g++) {
     S.groupTargetEntityId[g] = -1;
@@ -90,11 +117,9 @@ export function initializeWorld(): void {
     S.bldType[g] = C.BuildingType.Warehouse;
     S.bldHealth[g] = 1000;
     S.bldOwnerGroup[g] = g;
-    // Add starting food (slot 2) and some wood/gold
-    S.bldInventory[g * 4 + 0] = 500;  // Wood
-    S.bldInventory[g * 4 + 1] = 500;  // Gold
-    S.bldInventory[g * 4 + 2] = 1000; // Food
-    S.bldInventory[g * 4 + 3] = 0;    // Misc
+    S.bldDataA[g] = 5000;
+    S.bldDataB[g] = 5000;
+    S.bldDataC[g] = 0;
   }
 
   generateBiomes();
@@ -112,7 +137,7 @@ export function initializeWorld(): void {
     for (let s = 0; s < C.EVENT_SLOTS_PER_CHARACTER; s++) S.pendingEvents[baseEventIdx + s] = -1;
     S.targetEntityId[i] = -1; S.targetBuildingId[i] = -1; S.targetVehicleId[i] = -1; S.isMounted[i] = 0; S.activeCommandPriority[i] = 0; S.activePrioritySlot[i] = -1;
     S.entityInventory[i] = 0; S.mana[i] = 100; S.carriedIntelEntityId[i] = -1;
-    S.charWeapon[i] = 0; S.charArmor[i] = 0; S.charTool[i] = 0;
+    S.charWeapon[i] = -1; S.charArmor[i] = -1; S.charTool[i] = -1;
     // Default stats with variance
     S.lifespan[i] = 60 + Math.floor(Math.random() * 21);  // 60-80 years
     S.damage[i] = 10 + Math.floor((Math.random() - 0.5) * 4);  // 8-12 (±20%)

@@ -5,6 +5,8 @@ export const MAX_GROUPS = 1000;
 export const MAX_RULES = 100;
 export const MAX_BUILDINGS = 20_000;
 export const MAX_VEHICLES = 5_000;
+export const MAX_ITEM_DEFINITIONS = 1000;
+export const MAX_ITEM_INSTANCES = 50000;
 
 export const WORLD_WIDTH = 1600;
 export const WORLD_HEIGHT = 1200;
@@ -80,6 +82,24 @@ export enum VehicleType {
   Boat = 2,
   Helicopter = 3,
 }
+
+// Item Owner Types
+export const OWNER_TYPE_INACTIVE = 0;
+export const OWNER_TYPE_GROUND = 1;
+export const OWNER_TYPE_WAREHOUSE = 2;
+export const OWNER_TYPE_CHARACTER = 3;
+
+// Item Base Types
+export const ITEM_BASE_MELEE = 1;
+export const ITEM_BASE_RANGED = 2;
+export const ITEM_BASE_SHIELD = 3;
+export const ITEM_BASE_CONSUMABLE = 4;
+
+// Item Traits
+export const ITEM_TRAIT_NONE = 0;
+export const ITEM_TRAIT_CURSED = 1 << 0;  // Modifies lifespan or health parameters negatively
+export const ITEM_TRAIT_VAMPIRE = 1 << 1; // Transfers health variables during combat ticks
+export const ITEM_TRAIT_BLESSED = 1 << 2; // Increases statutory recovery velocity
 
 // Phase 19: OpCodes & Gates
 export const OP_POP_GT = 0;

@@ -70,6 +70,27 @@ export function recalculateEffectiveStats(entityId: number): void {
   S.effectiveLifespan[entityId] = baseLifespan + lifespanMod;
   S.effectiveDamage[entityId] = baseDamage + damageMod;
   S.effectiveSpeed[entityId] = baseSpeed * speedMod;
+  
+  ApplyEquipmentModifiers(entityId);
+}
+
+export function ApplyEquipmentModifiers(i: number): void {
+  // Check if we should override effective stats from equipment
+  // We apply on top of buffs, or reset to base if we want equipment to be the only thing?
+  // The prompt says "Reset effective stats to base stats" but let's just do it directly.
+  
+  // Base stats (could include buffs if we wanted, but let's follow the prompt exactly)
+  S.effectiveDamage[i] = S.damage[i];
+  S.effectiveSpeed[i] = S.speed[i];
+  S.effectiveLifespan[i] = S.lifespan[i];
+
+  if (S.charWeapon[i] !== -1) {
+    const defId = S.itemInstanceDefId[S.charWeapon[i]];
+    S.effectiveDamage[i] += S.itemDefStatA[defId];
+    if ((S.itemDefTraitMask[defId] & C.ITEM_TRAIT_CURSED) !== 0) {
+      S.effectiveLifespan[i] = Math.floor(S.effectiveLifespan[i] * 0.5);
+    }
+  }
 }
 
 /**

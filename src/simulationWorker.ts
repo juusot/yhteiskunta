@@ -115,7 +115,9 @@ self.onmessage = (e: MessageEvent) => {
           bldType: S.bldType.buffer,
           bldHealth: S.bldHealth.buffer,
           bldOwnerGroup: S.bldOwnerGroup.buffer,
-          bldInventory: S.bldInventory.buffer,
+          bldDataA: S.bldDataA.buffer,
+          bldDataB: S.bldDataB.buffer,
+          bldDataC: S.bldDataC.buffer,
           vehPositionX: S.vehPositionX.buffer,
           vehPositionY: S.vehPositionY.buffer,
           vehVelocityX: S.vehVelocityX.buffer,
@@ -123,7 +125,16 @@ self.onmessage = (e: MessageEvent) => {
           vehType: S.vehType.buffer,
           vehHealth: S.vehHealth.buffer,
           vehPilotId: S.vehPilotId.buffer,
-          vehOwnerGroup: S.vehOwnerGroup.buffer
+          vehOwnerGroup: S.vehOwnerGroup.buffer,
+          itemDefBaseType: S.itemDefBaseType.buffer,
+          itemDefStatA: S.itemDefStatA.buffer,
+          itemDefStatB: S.itemDefStatB.buffer,
+          itemDefTraitMask: S.itemDefTraitMask.buffer,
+          itemInstanceDefId: S.itemInstanceDefId.buffer,
+          itemInstanceOwnerType: S.itemInstanceOwnerType.buffer,
+          itemInstanceOwnerId: S.itemInstanceOwnerId.buffer,
+          itemInstanceX: S.itemInstanceX.buffer,
+          itemInstanceY: S.itemInstanceY.buffer
         }
       });
     } else {

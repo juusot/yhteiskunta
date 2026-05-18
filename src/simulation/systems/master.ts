@@ -15,6 +15,8 @@ export function SummarySystem(): void {
   S.groupFood.fill(0);
   S.groupMisc.fill(0);
   let totalActive = 0;
+  
+  const groupHouseCapacity = new Int32Array(C.MAX_GROUPS);
 
   // Phase 23: National Cohesion System
   // Update cohesion for all active groups
@@ -66,12 +68,15 @@ export function SummarySystem(): void {
       const gid = S.bldOwnerGroup[b];
       if (gid >= 0 && gid < C.MAX_GROUPS) {
         S.groupBuildingCount[gid]++;
-        const inv = S.bldInventory.slice(b * 4, b * 4 + 4);
-        S.groupTotalWealth[gid] += inv[0] + inv[1] + inv[2] + inv[3];
-        S.groupWood[gid] += inv[0];
-        S.groupGold[gid] += inv[1];
-        S.groupFood[gid] += inv[2];
-        S.groupMisc[gid] += inv[3];
+        if (S.bldType[b] === C.BuildingType.Warehouse) {
+          S.groupTotalWealth[gid] += S.bldDataA[b] + S.bldDataB[b] + S.bldDataC[b];
+          S.groupWood[gid] += S.bldDataA[b];
+          S.groupGold[gid] += S.bldDataB[b];
+          S.groupFood[gid] += S.bldDataC[b];
+          groupHouseCapacity[gid] += 20; // Base warehouse capacity
+        } else if (S.bldType[b] === C.BuildingType.House) {
+          groupHouseCapacity[gid] += S.bldDataB[b];
+        }
       }
     }
   }
@@ -105,12 +110,11 @@ export function SummarySystem(): void {
     // Safety net for the 4 primary nations
     const needsSafetySpawn = g < 4 && pop < 20;
     
-    // House capacity: Warehouse provides 20, Houses provide 5 each
-    const houseCapacity = Math.max(20, (bldCount - 1) * 5);
-    
+    // House capacity calculated from polymorphic registers
+    const houseCapacity = Math.max(20, groupHouseCapacity[g]);
+
     // Only allow reproduction if the group has capacity and wealth
-    const canAffordReproduction = pop > 0 && pop < houseCapacity && wealth > 1000;
-    
+    const canAffordReproduction = pop > 0 && pop < houseCapacity && wealth > 1000;    
     if (needsSafetySpawn || canAffordReproduction) {
       let births = 0;
       const maxBirths = needsSafetySpawn ? 5 : 2;

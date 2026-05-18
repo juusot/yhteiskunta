@@ -25,9 +25,9 @@ export let mana: Int16Array;
 
 // Phase 12: Logistics
 export let entityInventory: Int16Array;
-export let charWeapon: Int8Array;
-export let charArmor: Int8Array;
-export let charTool: Int8Array;
+export let charWeapon: Int32Array;
+export let charArmor: Int32Array;
+export let charTool: Int32Array;
 
 // Phase 21: Character Base Stats
 export let lifespan: Int16Array;        // Base years (default: 80)
@@ -111,7 +111,9 @@ export let bldPositionY: Float32Array;
 export let bldType: Uint8Array;
 export let bldHealth: Int32Array;
 export let bldOwnerGroup: Int32Array;
-export let bldInventory: Int32Array; // [buildingIdx * 4] -> Wood, Gold, Food, Misc
+export let bldDataA: Int32Array; // Stride: MAX_BUILDINGS
+export let bldDataB: Int32Array; // Stride: MAX_BUILDINGS
+export let bldDataC: Int32Array; // Stride: MAX_BUILDINGS
 
 export let vehPositionX: Float32Array;
 export let vehPositionY: Float32Array;
@@ -121,6 +123,18 @@ export let vehType: Uint8Array;
 export let vehHealth: Int32Array;
 export let vehPilotId: Int32Array; // Character currently driving
 export let vehOwnerGroup: Int32Array;
+
+// Items
+export let itemDefBaseType: Uint8Array;    // Size: MAX_ITEM_DEFINITIONS
+export let itemDefStatA: Int32Array;       // Size: MAX_ITEM_DEFINITIONS (Melee=Damage, Consumable=Heal)
+export let itemDefStatB: Int32Array;       // Size: MAX_ITEM_DEFINITIONS (Melee=Cooldown, Ranged=Range)
+export let itemDefTraitMask: Uint32Array;  // Size: MAX_ITEM_DEFINITIONS (Bitmask tracking effects)
+
+export let itemInstanceDefId: Uint16Array; // Size: MAX_ITEM_INSTANCES (Points to Item Definition index)
+export let itemInstanceOwnerType: Uint8Array; // Size: MAX_ITEM_INSTANCES (Inactive, Ground, WH, Char)
+export let itemInstanceOwnerId: Int32Array;   // Size: MAX_ITEM_INSTANCES (Entity ID or Group ID owner index)
+export let itemInstanceX: Float32Array;       // Size: MAX_ITEM_INSTANCES (World position on ground)
+export let itemInstanceY: Float32Array;       // Size: MAX_ITEM_INSTANCES (World position on ground)
 
 export let quadrantIndex: number = -1;
 export let minX = 0, maxX = 1600, minY = 0, maxY = 1200;
@@ -173,9 +187,12 @@ export function initializeState(): void {
   carriedIntelY = new Float32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
   mana = new Int16Array(new SharedArrayBuffer(C.MAX_ENTITIES * 2));
   entityInventory = new Int16Array(new SharedArrayBuffer(C.MAX_ENTITIES * 2));
-  charWeapon = new Int8Array(new SharedArrayBuffer(C.MAX_ENTITIES));
-  charArmor = new Int8Array(new SharedArrayBuffer(C.MAX_ENTITIES));
-  charTool = new Int8Array(new SharedArrayBuffer(C.MAX_ENTITIES));
+  charWeapon = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
+  charWeapon.fill(-1);
+  charArmor = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
+  charArmor.fill(-1);
+  charTool = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
+  charTool.fill(-1);
   lifespan = new Int16Array(new SharedArrayBuffer(C.MAX_ENTITIES * 2));
   damage = new Int16Array(new SharedArrayBuffer(C.MAX_ENTITIES * 2));
   speed = new Float32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
@@ -219,7 +236,9 @@ export function initializeState(): void {
   bldType = new Uint8Array(new SharedArrayBuffer(C.MAX_BUILDINGS));
   bldHealth = new Int32Array(new SharedArrayBuffer(C.MAX_BUILDINGS * 4));
   bldOwnerGroup = new Int32Array(new SharedArrayBuffer(C.MAX_BUILDINGS * 4));
-  bldInventory = new Int32Array(new SharedArrayBuffer(C.MAX_BUILDINGS * 4 * 4));
+  bldDataA = new Int32Array(new SharedArrayBuffer(C.MAX_BUILDINGS * 4));
+  bldDataB = new Int32Array(new SharedArrayBuffer(C.MAX_BUILDINGS * 4));
+  bldDataC = new Int32Array(new SharedArrayBuffer(C.MAX_BUILDINGS * 4));
 
   // Vehicles
   vehPositionX = new Float32Array(new SharedArrayBuffer(C.MAX_VEHICLES * 4));
@@ -230,6 +249,18 @@ export function initializeState(): void {
   vehHealth = new Int32Array(new SharedArrayBuffer(C.MAX_VEHICLES * 4));
   vehPilotId = new Int32Array(new SharedArrayBuffer(C.MAX_VEHICLES * 4));
   vehOwnerGroup = new Int32Array(new SharedArrayBuffer(C.MAX_VEHICLES * 4));
+
+  // Items
+  itemDefBaseType = new Uint8Array(new SharedArrayBuffer(C.MAX_ITEM_DEFINITIONS));
+  itemDefStatA = new Int32Array(new SharedArrayBuffer(C.MAX_ITEM_DEFINITIONS * 4));
+  itemDefStatB = new Int32Array(new SharedArrayBuffer(C.MAX_ITEM_DEFINITIONS * 4));
+  itemDefTraitMask = new Uint32Array(new SharedArrayBuffer(C.MAX_ITEM_DEFINITIONS * 4));
+
+  itemInstanceDefId = new Uint16Array(new SharedArrayBuffer(C.MAX_ITEM_INSTANCES * 2));
+  itemInstanceOwnerType = new Uint8Array(new SharedArrayBuffer(C.MAX_ITEM_INSTANCES));
+  itemInstanceOwnerId = new Int32Array(new SharedArrayBuffer(C.MAX_ITEM_INSTANCES * 4));
+  itemInstanceX = new Float32Array(new SharedArrayBuffer(C.MAX_ITEM_INSTANCES * 4));
+  itemInstanceY = new Float32Array(new SharedArrayBuffer(C.MAX_ITEM_INSTANCES * 4));
 
   initializeLocalState();
 }
@@ -268,9 +299,9 @@ export function mapStateBuffers(buffers: any): void {
   worldMap = new Uint8Array(buffers.worldMap);
   globalFlowField = new Float32Array(buffers.globalFlowField);
   entityInventory = new Int16Array(buffers.entityInventory);
-  charWeapon = new Int8Array(buffers.charWeapon);
-  charArmor = new Int8Array(buffers.charArmor);
-  charTool = new Int8Array(buffers.charTool);
+  charWeapon = new Int32Array(buffers.charWeapon);
+  charArmor = new Int32Array(buffers.charArmor);
+  charTool = new Int32Array(buffers.charTool);
   lifespan = new Int16Array(buffers.lifespan);
   damage = new Int16Array(buffers.damage);
   speed = new Float32Array(buffers.speed);
@@ -300,7 +331,9 @@ export function mapStateBuffers(buffers: any): void {
   bldType = new Uint8Array(buffers.bldType);
   bldHealth = new Int32Array(buffers.bldHealth);
   bldOwnerGroup = new Int32Array(buffers.bldOwnerGroup);
-  bldInventory = new Int32Array(buffers.bldInventory);
+  bldDataA = new Int32Array(buffers.bldDataA);
+  bldDataB = new Int32Array(buffers.bldDataB);
+  bldDataC = new Int32Array(buffers.bldDataC);
 
   // Vehicles
   vehPositionX = new Float32Array(buffers.vehPositionX);

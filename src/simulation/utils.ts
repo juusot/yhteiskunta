@@ -194,7 +194,9 @@ export function createGroup(name: string, _ownerId: number = -1): number {
           S.bldOwnerGroup[b] = g;
           S.bldPositionX[b] = 100 + g * 50;  // Spread out
           S.bldPositionY[b] = 100 + g * 50;
-          S.bldInventory[b * 4 + 1] = 1000;  // Gold in warehouse
+          S.bldDataA[b] = 5000;
+          S.bldDataB[b] = 5000;
+          S.bldDataC[b] = 0;
           S.groupBuildingCount[g] = 1;
           break;
         }

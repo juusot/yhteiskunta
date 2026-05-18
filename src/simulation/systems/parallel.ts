@@ -111,18 +111,32 @@ export function LifeSystem(): void {
     if (S.state[i] === C.EntityState.Harvesting && S.targetEntityId[i] !== -1) {
       if (S.tickCount % 4 === 0) { S.health[i]++; if (S.health[i] > 100) S.health[i] = 100; }
     }
+
     if (S.health[i] <= 0) {
       const isResource = (S.traitBitmask[i] & (C.TRAIT_TREE | C.TRAIT_GOLD | C.TRAIT_BUSH)) !== 0;
       const isCharacter = !isResource && (S.traitBitmask[i] & C.TRAIT_LOOT) === 0;
 
-      if (isCharacter && (S.charWeapon[i] > 0 || S.charArmor[i] > 0 || S.charTool[i] > 0 || S.money[i] > 100)) {
-        // Drop Loot Pile
-        S.traitBitmask[i] = C.TRAIT_LOOT;
-        S.health[i] = 1000; // Duration of loot pile
-        S.state[i] = C.EntityState.Idle;
-        S.velocityX[i] = 0; S.velocityY[i] = 0;
-        // Keep money/items on the entity for others to harvest
-        continue;
+      if (isCharacter) {
+        // Drop items
+        const equipmentSlots = [S.charWeapon[i], S.charArmor[i], S.charTool[i]];
+        for (const instId of equipmentSlots) {
+          if (instId !== -1) {
+            S.itemInstanceOwnerType[instId] = C.OWNER_TYPE_GROUND;
+            S.itemInstanceOwnerId[instId] = -1;
+            S.itemInstanceX[instId] = S.positionX[i];
+            S.itemInstanceY[instId] = S.positionY[i];
+          }
+        }
+
+        S.charWeapon[i] = -1; S.charArmor[i] = -1; S.charTool[i] = -1;
+
+        if (S.money[i] > 100 || equipmentSlots.some(id => id !== -1)) {
+          // Drop Loot Pile
+          S.traitBitmask[i] = C.TRAIT_LOOT;
+          S.health[i] = 1000; // Duration of loot pile
+          S.state[i] = C.EntityState.Idle;
+          continue;
+        }
       }
 
       if ((S.traitBitmask[i] & C.TRAIT_COURIER) !== 0 && S.entityInventory[i] > 0) {
@@ -138,8 +152,8 @@ export function LifeSystem(): void {
       S.positionX[i] = -1000.0; S.positionY[i] = -1000.0;
       S.targetEntityId[i] = -1; S.targetBuildingId[i] = -1; S.velocityX[i] = 0; S.velocityY[i] = 0;
       S.entityInventory[i] = 0; S.actionTimer[i] = 0;
-      S.charWeapon[i] = 0; S.charArmor[i] = 0; S.charTool[i] = 0;
-      
+      S.charWeapon[i] = -1; S.charArmor[i] = -1; S.charTool[i] = -1;
+
       if (!isResource) S.traitBitmask[i] = C.TRAIT_NONE;
     }
   }
@@ -599,12 +613,17 @@ export function SteeringSystem(): void {
           const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS];
           const invSlot = S.charTool[i]; // 0=wood, 1=gold, 2=food, 3=misc
           Atomics.add(S.groupTotalWealth, gid, S.entityInventory[i]);
-          Atomics.add(S.bldInventory, bldId * 4 + invSlot, S.entityInventory[i]);
+          
+          if (S.bldType[bldId] === C.BuildingType.Warehouse) {
+            if (invSlot === 0) Atomics.add(S.bldDataA, bldId, S.entityInventory[i]);
+            else if (invSlot === 1) Atomics.add(S.bldDataB, bldId, S.entityInventory[i]);
+            else if (invSlot === 2) Atomics.add(S.bldDataC, bldId, S.entityInventory[i]);
+          }
+          
           S.entityInventory[i] = 0;
-          S.charTool[i] = 0; // Reset tool slot
+          S.charTool[i] = -1; // Reset tool slot
           if (S.money[i] > 500) {
-            if (S.charWeapon[i] === 0) { S.charWeapon[i] = 1; Atomics.sub(S.money, i, 500); }
-            else if (S.charArmor[i] === 0) { S.charArmor[i] = 1; Atomics.sub(S.money, i, 500); }
+            // Money logic here, maybe buying items in the future
           }
           S.state[i] = C.EntityState.Idle; S.actionTimer[i] = 60;
         } else { S.velocityX[i] = 0; S.velocityY[i] = 0; }
@@ -745,10 +764,10 @@ export function SteeringSystem(): void {
             if ((S.traitBitmask[targetId] & C.TRAIT_LOOT) !== 0) {
                const moneyPart = Math.min(S.money[targetId], 50);
                if (moneyPart > 0) { Atomics.sub(S.money, targetId, moneyPart); Atomics.add(S.money, i, moneyPart); }
-               if (S.charWeapon[targetId] > S.charWeapon[i]) S.charWeapon[i] = S.charWeapon[targetId];
-               if (S.charArmor[targetId] > S.charArmor[i]) S.charArmor[i] = S.charArmor[targetId];
+               if (S.charWeapon[targetId] !== -1 && S.charWeapon[i] === -1) { S.charWeapon[i] = S.charWeapon[targetId]; S.charWeapon[targetId] = -1; }
+               if (S.charArmor[targetId] !== -1 && S.charArmor[i] === -1) { S.charArmor[i] = S.charArmor[targetId]; S.charArmor[targetId] = -1; }
                S.health[targetId] -= 100;
-               if (S.health[targetId] <= 0 || (S.money[targetId] <= 0 && S.charWeapon[targetId] === 0)) { S.state[i] = C.EntityState.Idle; S.targetEntityId[i] = -1; }
+               if (S.health[targetId] <= 0 || (S.money[targetId] <= 0 && S.charWeapon[targetId] === -1)) { S.state[i] = C.EntityState.Idle; S.targetEntityId[i] = -1; }
             } else {
                S.health[targetId] -= 20; S.entityInventory[i] += 10;
                if (S.entityInventory[i] >= 100) {
@@ -767,10 +786,13 @@ export function SteeringSystem(): void {
 }
 
 export function CombatDamageSystem(attackerId: number, victimId: number, damageValue: number): void {
-   const weaponLevel = S.charWeapon[attackerId];
-   const armorLevel = S.charArmor[victimId];
-   const finalDamage = Math.max(1, (damageValue + weaponLevel * 5) - (armorLevel * 3));
-   S.health[victimId] -= finalDamage; 
+   let armorLevel = 0;
+   if (S.charArmor[victimId] !== -1) {
+     const defId = S.itemInstanceDefId[S.charArmor[victimId]];
+     armorLevel = S.itemDefStatA[defId] || 0;
+   }
+   const finalDamage = Math.max(1, S.effectiveDamage[attackerId] - armorLevel);
+   S.health[victimId] -= finalDamage;
    S.targetEntityId[victimId] = -1; S.actionTimer[victimId] = 0;
   const groupA = S.groupAffiliations[attackerId * 8]; const groupB = S.groupAffiliations[victimId * 8];
   if (groupA !== -1 && groupB !== -1 && groupA !== groupB) {
