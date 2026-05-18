@@ -328,6 +328,27 @@ export function SteeringSystem(): void {
     if (S.positionX[i] < S.minX || S.positionX[i] > S.maxX || S.positionY[i] < S.minY || S.positionY[i] > S.maxY) continue;
 
     const targetId = S.targetEntityId[i];
+
+    // Boarding Logic
+    const vId = S.targetVehicleId[i];
+    if (vId !== -1 && S.isMounted[i] === 0) {
+      const dx = S.vehPositionX[vId] - S.positionX[i];
+      const dy = S.vehPositionY[vId] - S.positionY[i];
+      const distSq = dx * dx + dy * dy;
+      if (distSq < 25.0) {
+        if (Atomics.compareExchange(S.vehPilotId, vId, -1, i) === -1) {
+          S.isMounted[i] = 1;
+        } else {
+          let passengers = 0;
+          for (let p = 0; p < C.MAX_ENTITIES; p++) {
+            if (S.isMounted[p] === 1 && S.targetVehicleId[p] === vId) passengers++;
+          }
+          const maxP = S.vehType[vId] === C.VEHICLE_SHIP ? C.MAX_PASSENGERS_SHIP : C.MAX_PASSENGERS_WAGON;
+          if (passengers < maxP) S.isMounted[i] = 1;
+        }
+      }
+    }
+
     if (targetId === -3) {
       const tx = S.playerTargetX[i], ty = S.playerTargetY[i];
       const dx = tx - S.positionX[i], dy = ty - S.positionY[i];
@@ -538,6 +559,7 @@ export function AuraSystem(): void {
 export function MovementSystem(): void {
   for (let i = 0; i < C.MAX_ENTITIES; i++) {
     if (S.state[i] === C.EntityState.Dead || (S.traitBitmask[i] & (C.TRAIT_TREE | C.TRAIT_GOLD | C.TRAIT_BUSH)) !== 0) continue;
+    if (S.isMounted[i] === 1) continue;
     if (S.positionX[i] < S.minX || S.positionX[i] > S.maxX || S.positionY[i] < S.minY || S.positionY[i] > S.maxY) continue;
 
     let moveX = S.velocityX[i];
@@ -567,6 +589,24 @@ export function MovementSystem(): void {
     if (S.vehHealth[i] <= 0 || S.vehType[i] === 0) continue;
     if (S.vehPositionX[i] < S.minX || S.vehPositionX[i] > S.maxX || S.vehPositionY[i] < S.minY || S.vehPositionY[i] > S.maxY) continue;
 
+    const nextX = S.vehPositionX[i] + S.vehVelocityX[i];
+    const nextY = S.vehPositionY[i] + S.vehVelocityY[i];
+    const tx = Math.floor(nextX / C.TILE_SIZE);
+    const ty = Math.floor(nextY / C.TILE_SIZE);
+    const tileIdx = ty * C.WORLD_MAP_COLS + tx;
+
+    if (tx >= 0 && tx < C.WORLD_MAP_COLS && ty >= 0 && ty < C.WORLD_MAP_ROWS) {
+      const terrain = S.worldMap[tileIdx];
+      let blocked = false;
+      if (S.vehType[i] === C.VEHICLE_SHIP && terrain !== C.TerrainType.Water) blocked = true;
+      if (S.vehType[i] === C.VEHICLE_WAGON && (terrain === C.TerrainType.Water || terrain === C.TerrainType.Mountain)) blocked = true;
+      
+      if (blocked) {
+        S.vehVelocityX[i] = 0; S.vehVelocityY[i] = 0;
+        continue;
+      }
+    }
+
     S.vehPositionX[i] += S.vehVelocityX[i];
     S.vehPositionY[i] += S.vehVelocityY[i];
 
@@ -575,5 +615,19 @@ export function MovementSystem(): void {
     if (S.vehPositionX[i] > C.WORLD_WIDTH) S.vehPositionX[i] = C.WORLD_WIDTH;
     if (S.vehPositionY[i] < 0) S.vehPositionY[i] = 0;
     if (S.vehPositionY[i] > C.WORLD_HEIGHT) S.vehPositionY[i] = C.WORLD_HEIGHT;
+  }
+
+  // Passenger Position Sync
+  for (let i = 0; i < C.MAX_ENTITIES; i++) {
+    if (S.isMounted[i] === 1) {
+      const vId = S.targetVehicleId[i];
+      if (vId !== -1) {
+        if (S.vehPositionX[vId] >= S.minX && S.vehPositionX[vId] <= S.maxX && 
+            S.vehPositionY[vId] >= S.minY && S.vehPositionY[vId] <= S.maxY) {
+          S.positionX[i] = S.vehPositionX[vId];
+          S.positionY[i] = S.vehPositionY[vId];
+        }
+      }
+    }
   }
 }

@@ -1,541 +1,327 @@
-# Yhteiskunta - Game Mechanics Wiki
+# **Yhteiskunta - Game Mechanics Wiki**
 
-> **Yhteiskunta** (Finnish for "society") - A simulation game where autonomous characters build, survive, and form societies driven by group rules and player-defined logic.
+**Yhteiskunta** (Finnish for "society") is a highly optimized, real-time simulation game where up to 100,000 autonomous entities build, harvest, wage war, and form complex political networks. The simulation runs on a multi-threaded web worker architecture governed by user-defined compound rule bytecodes and custom script parameters.
 
----
+## **Table of Contents**
 
-## Table of Contents
+1. [Core Systems Architecture](#core-systems-architecture)
+2. [World & Biome Generation](#world--biome-generation)
+3. [Resource Flow & Economics](#resource-flow--economics)
+4. [Character Stats & Lifespan](#character-stats--lifespan)
+5. [Item Definition & Instance Registries](#item-definition--instance-registries)
+6. [Societal Hierarchy & Channels](#societal-hierarchy--channels)
+7. [Polymorphic Building System](#polymorphic-building-system)
+8. [Vehicles & Mount Subsystems](#vehicles--mount-subsystems)
+9. [Projectiles & Radial Auras](#projectiles--radial-auras)
+10. [Bytecode Rules & Virtual Machine](#bytecode-rules--virtual-machine)
+11. [Player Selection & Command Injection](#player-selection--command-injection)
+12. [WebGL2 Instanced Rendering Shader Pipeline](#webgl2-instanced-rendering-shader-pipeline)
+13. [Architecture File Reference](#architecture-file-reference)
 
-1. [Core Systems](#core-systems)
-2. [Resources](#resources)
-3. [Characters](#characters)
-4. [Groups & Nations](#groups--nations)
-5. [Group Hierarchy System](#group-hierarchy-system) ⭐ NEW
-6. [Buff System](#buff-system) ⭐ NEW
-7. [Game Time](#game-time) ⭐ NEW
-8. [Buildings](#buildings)
-9. [AI & Behavior](#ai--behavior)
-10. [Combat](#combat)
-11. [Territory & Influence](#territory--influence)
+## **Core Systems Architecture**
 
----
+### **Multi-Threaded Memory Model**
 
-## Core Systems
+The entire simulation state is mapped to a unified `SharedArrayBuffer` block split into contiguous, index-matched typed arrays. This design allows four concurrent Web Workers to execute simulation logic in parallel across partitioned quadrants of the map grid without thread context-switching overhead or dynamic JavaScript heap allocations.
 
-### Simulation Architecture
+- **Quadrant Partitioning**:
+  - **Quadrant 0 (Top-Left)**: World coordinates $X \in [0, 800)$, $Y \in [0, 600)$
+  - **Quadrant 1 (Top-Right)**: World coordinates $X \in [800, 1600)$, $Y \in [0, 600)$
+  - **Quadrant 2 (Bottom-Left)**: World coordinates $X \in [0, 800)$, $Y \in [600, 1200)$
+  - **Quadrant 3 (Bottom-Right)**: World coordinates $X \in [800, 1600)$, $Y \in [600, 1200)$
 
-- **Platform**: Tauri + Vite + TypeScript (background Web Worker)
-- **Data Pattern**: Pure Data-Oriented Design (DOD) via Entity Component System (ECS)
-- **Entity Limit**: 100,000 entities
-- **Building Limit**: 20,000 buildings
-- **Group Limit**: 1,000 groups
-- **World Size**: 1600×1200 units (160×120 tiles)
+- **Barriers & Synchronization**:  
+  A thread-safe barrier primitive (`Atomics.wait()` / `Atomics.notify()`) forces all workers to sync at key logical boundaries during each simulation frame:
+  - **Phase 0**: Spatial hashing and intelligence data exchange
+  - **Phase 1**: Throttled systems execution (Master worker only)
+  - **Phase 2**: Autonomy AI evaluations and physical steering calculations
+  - **Phase 3**: Positional and kinematic vector integrations
 
-### Tick System
+## **World & Biome Generation**
 
-- Simulation runs at 60 ticks/second
-- Systems execute in parallel across 4 quadrants
-- SummarySystem runs every 60 ticks (1 second) for population/food calculations
+The map covers a coordinates envelope of $1600 \times 1200$ units, mapped onto a $160 \times 120$ tile terrain grid ($10 \times 10$ units per tile).
 
----
+### **Terrain Enums & Shaders**
 
-## Resources
+The map contains four base terrain textures:
 
-### Resource Types
+- **Grass (0)**: Supports bush growth. Rendered as pale yellow-white.
+- **Forest (1)**: High resource density. Limits entity movement speed by a factor of $0.6 \times$. Rendered as dark green.
+- **Water (2)**: Deep water. Limits entity movement speed by a factor of $0.3 \times$. Spawns gold resource deposits. Rendered as blue.
+- **Mountain (3)**: Impassable terrain. Blocks all pathfinding and construction checks. Rendered as grey.
 
-| Type | Inventory Slot | Source | Use |
-|------|---------------|--------|-----|
-| **Wood** | 0 | Trees (Forest tiles) | Buildings, items |
-| **Gold** | 1 | Gold nodes (Water tiles) | Currency, trade, buildings |
-| **Food** | 2 | Bushes (Grass), Fields | **Survival only** |
-| **Misc** | 3 | Loot piles | Future use |
+### **Generated Features**
 
-### Resource Flow
+1. **The River**: A sinuous, continuous body of water cutting horizontally through the center of the world, calculated using a sine-wave function:  
+   $$Y = 60 + \sin(X \times 0.1) \times 20$$
+2. **Mountain Ranges**: Placed along the topmost 10 tiles and bottommost 10 tiles of the map coordinates.
+3. **Forest Patches**: Spawns 40 distinct radial forest patches using randomized coordinates and radius bounds ($4$ to $11$ tiles) across grass-designated zones.
 
-```
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│   Harvest    │────▶│   Return     │────▶│   Deposit    │
-│  (bush/tree) │     │  to depot    │     │  (warehouse) │
-└──────────────┘     └──────────────┘     └──────────────┘
-       │                    │                    │
-       ▼                    ▼                    ▼
-  entityInventory      Navigate to         bldInventory[slot]
-  += 10 per tick       warehouse           groupFood += value
-  charTool = type      (flow field)        (summed by SummarySystem)
-```
+## **Resource Flow & Economics**
 
-### Food Mechanics
+### **Resource Types**
 
-**Consumption Rate:**
-```
-foodRequired = max(1, population × 0.1)  // per tick cycle
-```
+| Resource | Index | Harvesting Tool | Natural Source           | Storage Depot        | Use cases                          |
+| :------- | :---- | :-------------- | :----------------------- | :------------------- | :--------------------------------- |
+| **Wood** | 0     | `charTool = 0`  | Tree (TRAIT_TREE)        | Warehouse `bldDataA` | Building construction & Upgrades   |
+| **Gold** | 1     | `charTool = 1`  | Gold Node (TRAIT_GOLD)   | Warehouse `bldDataB` | Standard trade currency & Upgrades |
+| **Food** | 2     | `charTool = 2`  | Bush (TRAIT_BUSH), Field | Warehouse `bldDataC` | Population survival & Reproduction |
+| **Misc** | 3     | `charTool = 3`  | Loot Piles (TRAIT_LOOT)  | Warehouse `bldDataC` | Special items                      |
 
-**Starvation:**
-- Only groups **with food storage** can starve
-- Groups without warehouses/fields don't consume food (safe start)
-- Starving characters: -10 health/cycle
-- Partial food = partial starvation (need < 50% of required)
+### **Logistics Pipeline**
 
-**Starting Resources:**
-All 4 primary nations spawn with:
-- 1,000 food
-- 500 wood
-- 500 gold
-
----
-
-## Characters
-
-### Entity States
-
-| State | ID | Description |
-|-------|----|-------------|
-| `Idle` | 0 | Default state, wandering |
-| `Harvesting` | 1 | Gathering from resources |
-| `Fleeing` | 2 | Escaping threats |
-| `Combat` | 3 | Attacking enemies |
-| `ReturningToDepot` | 4 | Bringing resources home |
-| `Dead` | 5 | Removed from simulation |
-| `Trading` | 6 | Courier between groups |
-| `ReportingIntel` | 7 | Scout reporting enemies |
-| `Construction` | 8 | Building structures |
-
-### Character Traits (Bitmask)
-
-| Bit | Trait | Effect |
-|-----|-------|--------|
-| 0 | `TREE` | Entity is a tree (non-mobile) |
-| 1 | `GOLD` | Entity is gold node (non-mobile) |
-| 2 | `BUSH` | Entity is bush (non-mobile) |
-| 3 | `AGGRESSIVE` | Fights when attacked |
-| 4 | `SCOUT` | Reports enemy positions |
-| 5 | `FANATIC` | [Reserved] |
-| 6 | `COURIER` | Trades between groups |
-| 7 | `MAGIC` | Uses mana for intel reporting |
-| 8 | `LOOT` | Entity is a loot pile |
-
-### Equipment
-
-| Slot | Array | Effect |
-|------|-------|--------|
-| Weapon | `charWeapon[]` | +5 damage per level in combat |
-| Armor | `charArmor[]` | -3 damage taken per level |
-| Tool | `charTool[]` | **Also stores resource type** (0=wood, 1=gold, 2=food, 3=misc) |
-
-### Health & Death
-
-- Starting health: 100
-- Natural decay: -1/tick (unless harvesting/has money)
-- Starvation: -10/cycle
-- Combat damage: 10 + (weapon×5) - (armor×3)
-- Death drops loot pile if character had items/money
-
----
-
-## Groups & Nations
-
-### Group Structure
-
-- **Maximum**: 1,000 groups
-- **Primary Nations**: 4 (groups 0-3) with safety net spawning
-- **Warehouse**: Each group has a central warehouse building
-
-### Group Resources
-
-| Array | Description |
-|-------|-------------|
-| `groupPopulationCount[]` | Active character count |
-| `groupBuildingCount[]` | Total buildings owned |
-| `groupTotalWealth[]` | Sum of all resources |
-| `groupWood[]` | Wood in buildings |
-| `groupGold[]` | Gold in buildings |
-| `groupFood[]` | **Food reserves** (consumed for survival) |
-| `groupMisc[]` | Misc resources |
-
-### Group Commands
-
-Groups can issue orders via `groupTargetEntityId[]`:
-- `-1`: No order
-- `-2`: Flow field navigation target
-- `>= 0`: Attack specific entity ID
-
-Characters check group orders every tick and obey based on affiliation priority (slot 0 = highest).
-
-### Diplomacy
-
-- `groupRelationsMatrix[]`: 1000×1000 matrix (-100 to +100)
-- Relations decrease when groups fight
-- Relations increase via trade
-- Relations < -50: Automatic combat declaration
-- Relations >= 0: Trade possible
-
----
-
-## Group Hierarchy System ⭐
-
-### 8-Slot Priority System
-
-Each character can belong to **up to 8 groups** simultaneously:
-
-```
-Slot 0: Highest Priority (overrides all below)
-Slot 1: ↓
-Slot 2: ↓
-...
-Slot 7: Lowest Priority
+```text
+Natural Spawns (Trees/Bushes/Gold)
+         │
+         ▼
+Harvesting State (gathering rates: Wood=50, Gold=100, Food=10, Field=20)
+         │
+         ▼
+ReturningToDepot State (Movement guided by pathfinding flow fields)
+         │
+         ▼
+Deposit Interaction (Atomic additions into warehouse generic data registers)
 ```
 
-**Example Hierarchy:**
-```
-Character: [Warrior Clan, Red Nation, Smith Guild, Fire Cult, ...]
-           ↑
-      Slot 0 (highest priority)
+### **Survival & Consumption Metrics**
 
-When Warrior Clan says "attack" AND Red Nation says "defend":
-→ Character attacks (slot 0 wins)
-```
+- **Base Consumption**: Groups consume food reserves based on active population:
+  $$\text{Food Required} = \max(1, \lfloor\text{Group Population} \times 0.1\rfloor) \text{ per 60 ticks}$$
+- **Starvation Penalty**: If a group's warehouse food reserves (`bldDataC`) hit 0, all group members take -10 damage points every 60 ticks.
+- **Reproduction Thresholds**: If a group has a positive population below its structural capacity, and controls a total wealth value exceeding 1,000 gold, it spends 500 gold to spawn a new character at its primary warehouse coordinates.
 
-### Group Management
+## **Character Stats & Lifespan**
 
-**Create Group:**
-```javascript
-// Via UI: GROUPS tab → type name → CREATE
-// Via console:
-createGroup("My Group");
-```
+Characters are tracked via flat arrays mapping IDs to numeric values.
 
-**Assign Character:**
-```javascript
-// Via UI: Click group → ASSIGN MEMBER → enter entity ID and slot
-// Via console:
-assignToGroup(entityId, groupId, slot);  // slot: 0-7
-```
+### **Base Stats vs. Effective Cached Stats**
 
-**Send Event:**
-```javascript
-// Via UI: Click group → SEND EVENT → enter event type
-// Via console:
-sendEvent(groupId, eventType);
+To prevent expensive per-tick compound evaluations, characters store their raw innate biological parameters in base arrays, while calculating actual values into effective arrays when equipment or active buffs change:
 
-// Event types:
-99 = ATTACK
-100 = MOVE
-101 = RECRUIT
-102 = TRADE
-103 = REPORT
-104 = BUILD
-105 = DISBAND
-106 = CUSTOM
-```
+- `lifespan` vs. `effectiveLifespan` (Base average 60 to 80 years)
+- `damage` vs. `effectiveDamage` (Base average 8 to 12)
+- `speed` vs. `effectiveSpeed` (Base average 0.8 to 1.2)
 
-### Key Features
+### **Dynamic Stats Recalculation**
 
-- Groups are "hashtags" - no hardcoded types
-- User defines meaning through rules and naming
-- Groups persist (have warehouse buildings)
-- Starting wealth: 1,000 gold
-- Characters inherit group traits on building visit
+Effective stats are determined by adding flat modifiers and multiplying speed:
 
----
+$$\text{effectiveDamage} = \text{damage} + \sum \text{Damage Buffs} + \text{itemDefStatA}[\text{equippedWeaponDefId}]$$
+$$\text{effectiveSpeed} = \text{speed} \times \prod \text{Speed Buffs}$$
+$$\text{effectiveLifespan} = \text{lifespan} + \sum \text{Lifespan Buffs}$$
 
-## Buff System ⭐
+_Note: If a character is carrying a weapon containing the `ITEM_TRAIT_CURSED` bitmask, their `effectiveLifespan` is immediately cut by 50%._
 
-### Overview
+## **Item Definition & Instance Registries**
 
-Buffs modify character stats from various sources:
-- **Items** (cursed sword, blessed armor)
-- **Groups** (warrior clan bonuses)
-- **Regions** (cursed land debuffs)
-- **Events** (temporary power-ups)
-- **Custom** (user-defined effects)
+The item system utilizes a relational data layout separating static item templates from active, coordinate-tracked item instances in the world.
 
-### Stats Affected
+### **The Item Definition Registry (MAX_ITEM_DEFINITIONS = 1000)**
 
-| Stat | Base Range | Buff Effect |
-|------|-----------|-------------|
-| Lifespan | 60-80 years | + or - years |
-| Damage | 8-12 (±20%) | + or - flat value |
-| Speed | 0.8-1.2 (±20%) | Multiplier (0.5 = half, 2.0 = double) |
-| Health | 100 | + or - flat value |
-| Wealth | 0+ | + or - flat value |
+Stores static item templates and parameter baselines:
 
-### How Buffs Work
+- `itemDefBaseType`: Melee (1), Ranged (2), Shield (3), Consumable (4).
+- `itemDefStatA`: Flat primary modification stat (Melee = Damage, Consumables = Healing amount).
+- `itemDefStatB`: Auxiliary modification stat (Melee = Cooldown, Ranged = Attack range).
+- `itemDefTraitMask`: Active trait bitmasks (None = 0, Cursed = 1, Vampire = 2, Blessed = 4).
 
-**1. Apply Buff:**
-```javascript
-Buffs.applyBuff(entityId, {
-  id: 1,
-  name: "Cursed Sword",
-  source: "item",
-  sourceId: 999,
-  stats: { damage: 100, lifespan: -15 }
-});
+### **The Item Instance Buffer (MAX_ITEM_INSTANCES = 50000)**
+
+Tracks physical, individual items distributed across characters, buildings, or coordinates:
+
+- `itemInstanceDefId`: Points directly to the index template in the Definition Registry.
+- `itemInstanceOwnerType`: Inactive (0), Ground (1), Warehouse (2), Character (3).
+- `itemInstanceOwnerId`: Entity ID or Building ID owning this specific instance.
+- `itemInstanceX` / `itemInstanceY`: Precise world coordinates if lying on the ground.
+
+### **AI Autonomy Looting State**
+
+When a character is in the Idle state, they scan the spatial hash grid cells for ground items. If an item is discovered with a higher primary stat value than their current weapon, they transition to `C.EntityState.Looting`. Upon reaching the item coordinates:
+
+1. If they have an existing item equipped, its `itemInstanceOwnerType` is reverted to `C.OWNER_TYPE_GROUND` at the character's exact coordinates.
+2. The new item is equipped by writing its instance ID to the character's `charWeapon[]` index.
+3. `ApplyEquipmentModifiers()` is triggered to update the character's effective attributes immediately.
+
+## **Societal Hierarchy & Channels**
+
+Characters utilize an advanced 10-slot group channel structure that dictates allegiances and commands.
+
+```text
+Public Slots:  [ Slot 0 | Slot 1 | Slot 2 | Slot 3 | Slot 4 | Slot 5 | Slot 6 | Slot 7 ]
+Secret Slots:  [ Slot 8 | Slot 9 ]
 ```
 
-**2. Effective Stats Update:**
-- Base stats stored in arrays (`lifespan[]`, `damage[]`, `speed[]`)
-- Effective stats cached in arrays (`effectiveLifespan[]`, etc.)
-- Recalculated only when buffs change (not every tick)
+### **Channel Prioritization**
 
-**3. Remove Buff:**
-```javascript
-Buffs.removeBuff(entityId, buffId);
-// Stats revert to base
+- **Public Slots (0-7)**: Governs standard public affiliations (e.g., Slot 0 = Sovereign Nation, Slot 1 = Regional Clan, Slot 2 = Profession Guild).
+- **Secret Slots (8-9)**: Tracks covert networks (e.g., Spy Ring, Underworld Syndicate, Covert Cults).
+- **Command Overrides**: When multiple groups issue conflicting instructions (e.g., Faction A orders an attack, Faction B orders trade), the character checks slot indices in ascending order (0 to 7). The lowest slot index wins the command priority.
+
+### **National Cohesion & Anarchy Transitions**
+
+Each group tracks a `groupCohesion` value (0-100).
+
+- **Prosperity Growth**: Having group assets above 10,000 gold increases cohesion by +1 per day.
+- **Decline Decay**: Dropping below 0 gold reduces cohesion by -5 per day.
+- **Anarchy Trigger**: If a nation's cohesion drops below 30, an anarchy event triggers on the daily cycle. All citizens who have that nation assigned in public Slot 0 have their Slot 1 group (their regional family or guild) promoted to Slot 0, while the failing nation is demoted to Slot 5.
+
+### **Spy Sabotage Mechanics**
+
+Units belonging to a covert spy ring (assigned via secret Slot 8 or 9) can execute the `Sabotaging` (9) state. Every 60 frames, if a spy is within 5 units of an opposing faction's warehouse, they drain 500 gold from the group's treasury and decay relation matrices by -10.
+
+## **Polymorphic Building System**
+
+Buildings discard rigid, sparse, and dedicated data arrays in favor of a packed, polymorphic component design.
+
+### **Generic Data Registers (bldDataA, bldDataB, bldDataC)**
+
+The physical meaning of each building's 32-bit registers shifts dynamically based on its `bldType` enum:
+
+| Building Type    | Enum ID | bldDataA Registry        | bldDataB Registry     | bldDataC Registry    |
+| :--------------- | :------ | :----------------------- | :-------------------- | :------------------- |
+| **Warehouse**    | 1       | Stored Wood Quantity     | Stored Gold Quantity  | Stored Food Quantity |
+| **House**        | 2       | Current Inhabitants      | Max Resident Capacity | Comfort Rating       |
+| **Tower**        | 3       | Attack Range             | Attack Cooldown Timer | Damage Multiplier    |
+| **Wall**         | 4       | Hardness Rating          | Construction Stage    | Integrity State      |
+| **Field**        | 5       | Crop Maturity Multiplier | Harvest Yield Limit   | Irrigation State     |
+| **Mind Control** | 6       | Radial Influence Range   | Charge Reserve        | Subversion Rate      |
+
+### **Structural Evolution Tiers**
+
+Buildings can upgrade through three distinct architectural tiers:
+
+- **Tier Upgrade Requirements**:
+  - **Tier 1 → Tier 2**: Costs 500 Wood and 200 Gold.
+  - **Tier 2 → Tier 3**: Costs 1,500 Wood and 800 Gold.
+- **Upgraded Capabilities**:
+  - **Houses**: Max Capacity increases from 5 (Tier 1) → 12 (Tier 2) → 30 (Tier 3).
+  - **Warehouses**: Storage limit scales from 5,000 (Tier 1) → 25,000 (Tier 2) → 100,000 (Tier 3).
+
+## **Vehicles & Mount Subsystems**
+
+The vehicle system handles mass-agent logistics and transport across terrain types.
+
+### **Vehicle Specifications**
+
+- **Wagon (1)**: High-speed land-traversing wagon. Max passenger capacity = 6. Restricted entirely to non-water tiles.
+- **Ship (2)**: Mass-capacity aquatic transport. Max passenger capacity = 30. Restricted entirely to water tiles.
+
+### **Delegated Steering & Hashing**
+
+When characters approach their group's assigned vehicle, they enter the vehicle as passengers:
+
+1. **Pilot Assignment**: The first entity to board a vehicle claims the pilot seat. This write uses a thread-safe atomic comparison:
+   $$\text{Pilot Claim} = \text{Atomics.compareExchange}(S.\text{vehPilotId}, vIdx, -1, i)$$
+2. **Delegated Control**: If successful, the pilot entity takes steering control, setting the vehicle's velocity vectors. All other passengers skip autonomous steering and movement logic.
+3. **Coordinates Sync**: During the physical movement integration, all passenger positions are overwritten to match the parent vehicle's coordinates:
+   $$\text{passengerX} = S.\text{vehPositionX}[\text{vehicleId}]$$
+   $$\text{passengerY} = S.\text{vehPositionY}[\text{vehicleId}]$$
+
+## **Projectiles & Radial Auras**
+
+### **Ranged Projectile System (MAX_PROJECTILES = 20000)**
+
+Tracks physical projectiles (Arrows, Fireballs) flying along coordinates trajectories:
+
+- **Arrow (1)**: High speed, low area-of-effect. Deals 25 damage to the first opposing target hit.
+- **Fireball (2)**: High damage, visible area impact. Deals explosive area damage.
+- **Collision Checking**: Projectiles traverse the spatial hash grid cell corresponding to their current coordinate index ($O(1)$ lookup time) to identify potential victims, checking distance squared:
+  $$\text{Collision Target} = \text{dist}^2 < 16.0$$
+
+### **Radial Mind Control Auras**
+
+The Mind Control Tower projects a circular aura zone ($150$ units radius). Every tick, the tower queries all spatial hash cells within its radial envelope. For every character found, the tower forcefully rewrites their public Slot 0 group affiliation to match the tower's owning group, immediately converting their political allegiance.
+
+## **Bytecode Rules & Virtual Machine**
+
+Each group's intelligence rules are evaluated via a stack-based virtual machine, processing dynamic rules without compiling new JavaScript code.
+
+### **OpCode & Logic Reference**
+
+```text
+                     [ Opcode Registry Block ]
+ ┌───────────────────────┬───────────────────────┬───────────────────────┐
+ │       OP_POP_GT       │     OP_WEALTH_LT      │    OP_RELATION_LT     │
+ │    Group Pop > Val    │   Group Wealth < Val  │   Relations < Limit   │
+ ├───────────────────────┼───────────────────────┼───────────────────────┤
+ │      OP_DIST_GT       │    OP_TICK_MODULO     │   OP_RANDOM_CHANCE    │
+ │   Distance > Limit    │   Timer Interval Trg  │   Percentage Roll     │
+ ├───────────────────────┼───────────────────────┼───────────────────────┤
+ │    OP_COHESION_LT     │       GATE_AND        │        GATE_OR        │
+ │   Cohesion < Limit    │    Binary Logic AND   │    Binary Logic OR    │
+ └───────────────────────┴───────────────────────┴───────────────────────┘
 ```
 
-### Slow Update Cycle
+### **Action Opcodes**
 
-Group buffs apply when character **visits group building**:
-- Check every 60 ticks (1 second)
-- Within 50 units = "visited"
-- Prevents expensive per-tick lookups
+When a compound ruleset evaluates to TRUE (producing a 1 on top of the logic stack), it can execute high-level game actions:
 
-**Performance:**
-- Buff application: < 1ms for 50k entities
-- Only recalculates on buff change
-- Cached effective stats for fast access
+- `ACTION_SPAWN_DEFENSE_PROJECTILE` (101): Spawns a fireball projectile from the group's warehouse targeted towards the nearest hostile faction's assets.
+- `ACTION_DECLARE_WAR` (102): Forces the group's relation matrix with a random neutral group to -100, triggering military mobilizations.
 
----
+## **Player Selection & Command Injection**
 
-## Game Time ⭐
+Players interact directly with the simulation state through coordinate calculations and targeted input overrides.
 
-### Time System
+### **Inverse Camera Transform (Raycasting)**
 
-```
-60 ticks = 1 second real-time
-3600 ticks = 1 game day (1 minute real-time)
-30 days = 1 game month
-12 months = 1 game year
-```
+To click on map entities, screen coordinate pixels are translated into world space coordinates using the active camera position $(X, Y)$ and zoom scale:
 
-### UI Display
+$$\text{worldX} = \text{cameraX} + \frac{(\text{screenX} - \text{canvasRectLeft}) \times \text{scaleX}}{\text{zoom}}$$
+$$\text{worldY} = \text{cameraY} + \frac{(\text{screenY} - \text{canvasRectTop}) \times \text{scaleY}}{\text{zoom}}$$
 
-Top bar shows: `Day X, Month Y, Year Z`
+### **Selected Command Overrides (`targetEntityId = -3`)**
 
-### Usage
+When a player left-clicks an entity, they select it. Right-clicking anywhere on the canvas transmits a command to the worker threads, injecting world coordinates directly into `playerTargetX` and `playerTargetY` and setting `targetEntityId = -3`.
 
-**Check Time:**
-```javascript
-S.gameDay     // Current day (0-29)
-S.gameMonth   // Current month (0-11)
-S.gameYear    // Current year
-S.tickCount   // Total ticks since start
-```
+- **Bypassing Autonomy**: Entities flagged with `-3` bypass all autonomous goal gathering, survival logic, and rules evaluations. They march at double speed directly towards the target coordinates. Once they arrive within 2 pixels of the destination, they are released back to the AI state machine.
 
-**Daily Events:**
-- BuffSystem runs once per day (3600 ticks)
-- Clears expired buffs
-- Recalculates effective stats
+## **WebGL2 Instanced Rendering Shader Pipeline**
 
-**Slow Update Cycle:**
-- Group building visits: every 60 ticks
-- Not every tick (performance optimization)
+The rendering system uses WebGL2 instanced draw calls (`gl.drawArraysInstanced`) to render up to 100,000 entities, 20,000 buildings, 50,000 items, and 20,000 projectiles at 60 FPS.
 
----
-
-## Buildings
-
-### Building Types
-
-| ID | Type | Description |
-|----|------|-------------|
-| 0 | `None` | Empty slot |
-| 1 | `Warehouse` | Resource depot, group anchor |
-| 2 | `House` | +5 population capacity, costs 1000 wealth |
-| 3 | `Tower` | [Reserved for defense] |
-| 4 | `Wall` | [Reserved for defense] |
-| 5 | `Field` | **Permanent food source**, costs 600 wealth |
-
-### Building Properties
-
-| Array | Description |
-|-------|-------------|
-| `bldPositionX/Y[]` | World position |
-| `bldType[]` | Building type enum |
-| `bldHealth[]` | 0-1000 (construction: 0-1000, damage reduces) |
-| `bldOwnerGroup[]` | Owning group ID |
-| `bldInventory[]` | 4 slots: wood, gold, food, misc |
-
-### Construction
-
-1. Character enters `Construction` state
-2. Each tick: `bldHealth += 50`
-3. At 1000: Building complete
-4. Construction cost deducted from group wealth immediately
-
-### Field Mechanics
-
-**When to build:**
-- Group food < 100
-- Population > 0
-- No existing field owned
-- Group wealth > 800
-
-**Harvesting from Fields:**
-- Characters target field building (not entity)
-- Continuous harvest (field never depletes)
-- Same deposit mechanics as bushes
-
----
-
-## AI & Behavior
-
-### Priority Hierarchy
-
-Characters evaluate actions in strict order:
-
-```
-┌─────────────────────────────────────────┐
-│  1. SURVIVAL (Automatic)                │
-│  IF groupFood < population × 0.5:       │
-│    → Find nearest bush/field            │
-│    → Harvest immediately                │
-└─────────────────────────────────────────┘
-                  ↓ (if no survival need)
-┌─────────────────────────────────────────┐
-│  2. FINISH CURRENT TASK                 │
-│  - Return harvested resources           │
-│  - Complete construction                │
-│  - Deposit at warehouse                 │
-└─────────────────────────────────────────┘
-                  ↓ (if task complete)
-┌─────────────────────────────────────────┐
-│  3. GROUP COMMANDS                      │
-│  - Check pending events (attacks)       │
-│  - Check group target orders            │
-│  - Obey highest priority affiliation    │
-└─────────────────────────────────────────┘
-                  ↓ (if no orders)
-┌─────────────────────────────────────────┐
-│  4. IDLE / WANDER                       │
-│  - Default state                        │
-│  - Stay near warehouse                  │
-│  - Let groups drive progress            │
-└─────────────────────────────────────────┘
+```text
+       [ Client GPU VBO Memory ]
+        ├── Quad VBO (Basic Geometry Quad)
+        └── Dynamic Buffers (Sequence of Float32 coordinates)
+                     │
+                     ▼
+       [ Vertex Shader Calculations ]
+        ├── Invert camera translations
+        └── GPU-side discard check (push off-screen if inactive)
+                     │
+                     ▼
+       [ Fragment Shader Rasterizer ]
+        ├── Geometry calculations (Circle / Star / Flag drawing)
+        └── Color output formatting
 ```
 
-### Design Philosophy
+### **GPU-Side Culling**
 
-1. **Survival is automatic** - No random chance, characters ALWAYS seek food when critical
-2. **Task persistence** - Finish what you started before new actions
-3. **Group-driven progress** - Complex behaviors require explicit group rules
-4. **Idle by default** - Prevents chaotic random behavior
+To prevent CPU bottlenecking, the main thread streams raw arrays directly to the GPU. Culling inactive objects is handled entirely in the Vertex Shaders by moving the vertex coordinate off-screen, bypassing fragment rasterization:
 
-### State Machine
+- **Projectiles (`PROJ_VS`)**:  
+  `if (i_type == 0.0) { gl_Position = vec4(-10.0, -10.0, 0.0, 1.0); return; }`
 
-```
-                    ┌─────────────┐
-                    │    Idle     │
-                    └──────┬──────┘
-                           │ Survival need / Group order
-                           ▼
-                    ┌─────────────┐
-          ┌────────│  Harvesting   │────────┐
-          │        └──────┬──────┘        │
-          │               │ Full          │
-          │               ▼               │
-          │        ┌─────────────┐        │
-          │        │ Returning   │        │
-          │        │  To Depot   │        │
-          │        └──────┬──────┘        │
-          │               │ Arrived       │
-          │               ▼               │
-          │        ┌─────────────┐        │
-          │        │   Deposit   │        │
-          │        └──────┬──────┘        │
-          │               │               │
-          └───────────────┴───────────────┘
-                          │
-                          ▼
-                    ┌─────────────┐
-                    │    Idle     │ (loop)
-                    └─────────────┘
-```
+- **Ground Items (`ITEM_VS`)**:  
+  `if (i_ownerType != 1.0) { gl_Position = vec4(-10.0, -10.0, 0.0, 1.0); return; }`
 
----
+## **Architecture File Reference**
 
-## Combat
+### **File Reference Table**
 
-### Combat Initiation
+| Path                                 | Primary Architectural Responsibility                                            |
+| :----------------------------------- | :------------------------------------------------------------------------------ |
+| `src/simulation/constants.ts`        | Simulation limits, OpCode numbers, time constants, and enum states.             |
+| `src/simulation/state.ts`            | Declares and maps all SharedArrayBuffer typed array buffers.                    |
+| `src/simulation/initialization.ts`   | World generation, river curves, and default item definitions.                   |
+| `src/simulation/utils.ts`            | Thread synchronization barriers, spatial queries, and group management.         |
+| `src/simulation/buffs.ts`            | Sparse buff management, item traits, and effective stats recalculation.         |
+| `src/simulation/templates.ts`        | Script-compilation templates for national, military, and spy factions.          |
+| `src/simulation/systems/master.ts`   | Runs aggregate demographics, VM bytecode rules, and territorial influence maps. |
+| `src/simulation/systems/parallel.ts` | Runs quadrant life ticks, steering vectors, projectile math, and movement.      |
+| `src/simulationWorker.ts`            | Coordinates the synchronous loop execution pipeline across threads.             |
+| `src/main.tsx`                       | Obtains WebGL2 context, spawns workers, and compiles shaders.                   |
+| `src/App.tsx`                        | Provides user interfaces for rules compilation and group creation.              |
 
-1. **Group orders**: `groupTargetEntityId[]` set by rules
-2. **Relations < -50**: Automatic hostility
-3. **Attack events**: `EVENT_HOSTILE_ATTACK` pushed to entity queue
-4. **Territorial attrition**: Enemies in hostile territory take damage
-
-### Damage Calculation
-
-```
-finalDamage = max(1, (10 + weaponLevel × 5) - (armorLevel × 3))
-```
-
-### Combat Behavior
-
-- Aggressive characters: Fight back
-- Non-aggressive: Flee
-- Combat continues until target dies or out of range
-- Killing character drops loot pile (if had items)
-
----
-
-## Territory & Influence
-
-### Influence Map
-
-- Each tile tracks `influenceMap[]` (0-1000)
-- Characters increase their group's influence by standing on tiles
-- Influence decays over time (×0.9 per check)
-- Competing influences cancel out
-
-### Territory Ownership
-
-- `territoryOwnerMap[]` tracks which group owns each tile
-- Influence > 100 for 5 cycles → territory claimed
-- Influence < 10 → territory lost
-- Territory claim requires distance > 300 from main warehouse
-
-### Territorial Attrition
-
-- Characters in hostile territory (relations < -50): -2 health/cycle
-- Encourages groups to expand defensively
-
----
-
-## Appendix: File Reference
-
-| File | Purpose |
-|------|---------|
-| `src/simulation/constants.ts` | Game constants, enums, limits |
-| `src/simulation/state.ts` | Component array declarations |
-| `src/simulation/initialization.ts` | World generation, spawn logic |
-| `src/simulation/utils.ts` | Spatial queries, group commands |
-| `src/simulation/systems/master.ts` | SummarySystem, RuleEvaluation, Trade, Influence |
-| `src/simulation/systems/parallel.ts` | Autonomy, Steering, Movement, Life, Combat |
-| `src/App.tsx` | UI: Stats, Monitor, Rules tabs |
-| `src/main.tsx` | Rendering, input, simulation worker coordination |
-
----
-
-## Changelog
-
-### Task 6: Agriculture & Sustenance (Current)
-
-- ✅ Added `BuildingType.Field` (permanent food source)
-- ✅ Fixed food AI priority (survival = automatic priority 1)
-- ✅ Fixed food consumption (deducts from groupFood, not wealth)
-- ✅ Fixed resource deposit (correct inventory slots)
-- ✅ Added starting food (1000) to all nations
-- ✅ Rewrote AutonomySystem with clean priority hierarchy
-- ✅ Added field harvesting to SteeringSystem
-
-### Future Tasks
-
-- [ ] Task 7: Reproduction rules (population growth mechanics)
-- [ ] Task 8: Advanced building types (towers, walls)
-- [ ] Task 9: Trade system improvements
-- [ ] Task 10: Magic system expansion
-
----
-
-*Last updated: 2026-05-16*
+_Last updated: 2026-05-18_
