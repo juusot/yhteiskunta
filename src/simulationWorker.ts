@@ -375,4 +375,14 @@ self.onmessage = (e: MessageEvent) => {
       }
     }
   }
+
+  if (type === "UPDATE_BUILDING_REG") {
+    const { buildingId, register, value } = data.payload;
+
+    if (buildingId >= 0 && buildingId < C.MAX_BUILDINGS) {
+      if (register === "A") S.bldDataA[buildingId] = value;
+      if (register === "B") S.bldDataB[buildingId] = value;
+      if (register === "C") S.bldDataC[buildingId] = value;
+    }
+  }
 };

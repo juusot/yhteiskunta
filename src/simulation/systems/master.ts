@@ -41,6 +41,36 @@ export function SummarySystem(): void {
 
   // Food consumption - only food matters for survival, not wealth
   S.starvingGroups.fill(0);
+
+  // Demographic & Resource Aggregation (Restored and moved from gathering system)
+  S.groupWood.fill(0);
+  S.groupGold.fill(0);
+  S.groupFood.fill(0);
+  S.groupBuildingCount.fill(0);
+  S.groupHouseCapacity.fill(0);
+
+  for (let b = 0; b < C.MAX_BUILDINGS; b++) {
+    if (S.bldHealth[b] > 0 && S.bldType[b] !== 0) {
+      const gid = S.bldOwnerGroup[b];
+      if (gid >= 0 && gid < C.MAX_GROUPS) {
+        S.groupBuildingCount[gid]++;
+        if (S.bldType[b] === C.BuildingType.Warehouse) {
+          // Update group warehouse location
+          if (S.groupWarehouseX[gid] === 0) {
+            S.groupWarehouseX[gid] = S.bldPositionX[b];
+            S.groupWarehouseY[gid] = S.bldPositionY[b];
+          }
+          S.groupWood[gid] += S.bldDataA[b];
+          S.groupGold[gid] += S.bldDataB[b];
+          S.groupFood[gid] += S.bldDataC[b];
+          S.groupHouseCapacity[gid] += 20; // Base warehouse capacity
+        } else if (S.bldType[b] === C.BuildingType.House) {
+          S.groupHouseCapacity[gid] += S.bldDataB[b] || 5; // Default 5 if not set
+        }
+      }
+    }
+  }
+
   for (let g = 0; g < C.MAX_GROUPS; g++) {
     const pop = S.groupPopulationCount[g];
     if (pop === 0) continue;
@@ -50,12 +80,28 @@ export function SummarySystem(): void {
       continue;
     }
 
-    const foodRequired = Math.max(1, Math.floor(pop * 0.1));
-    if (S.groupFood[g] >= foodRequired) {
-      S.groupFood[g] -= foodRequired;
-    } else {
-      S.groupFood[g] = 0;
-      S.starvingGroups[g] = 1;
+    if (S.tickCount % C.TICKS_PER_DAY === 0) {
+      const foodRequired = Math.max(1, Math.floor(pop * 1.0)); // 1 unit per person per day
+      if (S.groupFood[g] >= foodRequired) {
+        // Deduct food from warehouses
+        let remainingToDeduct = foodRequired;
+        for (let b = 0; b < C.MAX_BUILDINGS; b++) {
+          if (
+            S.bldType[b] === C.BuildingType.Warehouse &&
+            S.bldOwnerGroup[b] === g
+          ) {
+            const val = Atomics.load(S.bldDataC, b);
+            const toTake = Math.min(remainingToDeduct, val);
+            Atomics.sub(S.bldDataC, b, toTake);
+            remainingToDeduct -= toTake;
+            if (remainingToDeduct <= 0) break;
+          }
+        }
+        S.groupFood[g] -= foodRequired;
+      } else {
+        S.groupFood[g] = 0;
+        S.starvingGroups[g] = 1;
+      }
     }
   }
 
@@ -727,55 +773,99 @@ function triggerAnarchy(governingGroupId: number): void {
 
 /**
  * Phase 23: Structure Evolution System
- * Evaluates building upgrades based on group resources.
+ * Evaluates building construction and character reproduction based on group resources.
  */
-export function StructureEvolutionSystem(): void {
-  for (let i = 0; i < C.MAX_BUILDINGS; i++) {
-    if (S.bldHealth[i] <= 0 || S.bldType[i] === 0) continue;
+export function StructureEvolutionSystem() {
+  // Iterate through all possible groups (up to C.MAX_GROUPS)
+  for (let g = 0; g < 100; g++) {
+    if (S.groupPopulationCount[g] === 0 && S.groupBuildingCount[g] === 0)
+      continue;
 
-    const gid = S.bldOwnerGroup[i];
-    if (gid === -1 || gid >= C.MAX_GROUPS) continue;
+    // 1. Build a House if wood is > 500
+    if (S.groupWood[g] >= 500) {
+      // Find group's warehouse to spawn house near it
+      const whX = S.groupWarehouseX[g];
+      const whY = S.groupWarehouseY[g];
 
-    const currentTier = S.bldTier[i];
-    if (currentTier >= 3) continue; // Max tier reached
-
-    let canUpgrade = false;
-    let costWood = 0;
-    let costGold = 0;
-
-    if (currentTier === 1) {
-      costWood = C.UPGRADE_TIER2_WOOD;
-      costGold = C.UPGRADE_TIER2_GOLD;
-    } else if (currentTier === 2) {
-      costWood = C.UPGRADE_TIER3_WOOD;
-      costGold = C.UPGRADE_TIER3_GOLD;
+      if (whX !== 0 || whY !== 0) {
+        // Valid warehouse coords
+        // Deduct wood across all warehouses for this group
+        let deducted = 0;
+        for (let b = 0; b < C.MAX_BUILDINGS; b++) {
+          if (S.bldType[b] === 1 && S.bldOwnerGroup[b] === g) {
+            if (Atomics.load(S.bldDataA, b) >= 500) {
+              Atomics.sub(S.bldDataA, b, 500);
+              deducted = 500;
+              break;
+            }
+          }
+        }
+        if (deducted >= 500) {
+          // Spawn new house (bldType = 2) nearby
+          for (let i = 0; i < C.MAX_BUILDINGS; i++) {
+            if (S.bldType[i] === 0) {
+              S.bldType[i] = 2; // House
+              S.bldPositionX[i] = whX + (Math.random() * 40 - 20);
+              S.bldPositionY[i] = whY + (Math.random() * 40 - 20);
+              S.bldHealth[i] = 1000;
+              S.bldOwnerGroup[i] = g;
+              break;
+            }
+          }
+        }
+      }
     }
 
-    if (S.groupWood[gid] >= costWood && S.groupGold[gid] >= costGold) {
-      canUpgrade = true;
-    }
+    // 2. Spawn new character if population is below capacity (simplified for Milestone 3)
+    // If they have excess food or just enough infrastructure, reproduce
+    const foodCost = 500;
+    const woodCost = 200;
 
-    if (canUpgrade) {
-      // Deduct resources
-      Atomics.sub(S.groupWood, gid, costWood);
-      Atomics.sub(S.groupGold, gid, costGold);
-      Atomics.sub(S.groupTotalWealth, gid, costWood + costGold);
+    if (
+      S.groupFood[g] >= foodCost &&
+      S.groupWood[g] >= woodCost &&
+      S.groupPopulationCount[g] < Math.max(20, S.groupHouseCapacity[g])
+    ) {
+      const whX = S.groupWarehouseX[g];
+      const whY = S.groupWarehouseY[g];
 
-      // Increment tier
-      S.bldTier[i] = currentTier + 1;
+      if (whX !== 0 || whY !== 0) {
+        for (let i = 0; i < C.MAX_ENTITIES; i++) {
+          if (S.state[i] === C.EntityState.Dead) {
+            S.positionX[i] = whX + 10;
+            S.positionY[i] = whY + 10;
+            S.health[i] = 100;
+            S.state[i] = C.EntityState.Idle;
+            S.groupAffiliations[i * C.MAX_GROUP_CHANNELS] = g;
 
-      // Re-calculate generic registers based on new tier
-      if (S.bldType[i] === C.BuildingType.Warehouse) {
-        // Warehouse Storage Limit
-        let newCapacity = 5000;
-        if (S.bldTier[i] === 2) newCapacity = 25000;
-        else if (S.bldTier[i] === 3) newCapacity = 100000;
-        // DataA/B/C are the current items stored, we don't overwrite them here.
-        // We will enforce the new capacities in parallel.ts when depositing.
-      } else if (S.bldType[i] === C.BuildingType.House) {
-        // Residential Capacity (DataB is Max Capacity)
-        if (S.bldTier[i] === 2) S.bldDataB[i] = 12;
-        else if (S.bldTier[i] === 3) S.bldDataB[i] = 30;
+            // Deduct resources from warehouses
+            let foodDeducted = 0;
+            let woodDeducted = 0;
+
+            for (let b = 0; b < C.MAX_BUILDINGS; b++) {
+              if (S.bldOwnerGroup[b] === g && S.bldType[b] === 1) {
+                if (foodDeducted < foodCost) {
+                  const toTake = Math.min(
+                    foodCost - foodDeducted,
+                    Atomics.load(S.bldDataC, b),
+                  );
+                  Atomics.sub(S.bldDataC, b, toTake);
+                  foodDeducted += toTake;
+                }
+                if (woodDeducted < woodCost) {
+                  const toTake = Math.min(
+                    woodCost - woodDeducted,
+                    Atomics.load(S.bldDataA, b),
+                  );
+                  Atomics.sub(S.bldDataA, b, toTake);
+                  woodDeducted += toTake;
+                }
+                if (foodDeducted >= foodCost && woodDeducted >= woodCost) break;
+              }
+            }
+            break;
+          }
+        }
       }
     }
   }

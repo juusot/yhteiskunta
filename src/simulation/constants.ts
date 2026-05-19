@@ -52,10 +52,10 @@ export const EVENT_CUSTOM = 106;
 export const ACTION_SPAWN_DEFENSE_PROJECTILE = 101;
 export const ACTION_DECLARE_WAR = 102;
 
-// Phase 21: Game Time
-export const TICKS_PER_DAY = 3600; // 60 ticks/sec × 60 sec = 1 minute real-time = 1 game day
-export const DAYS_PER_MONTH = 30;
-export const MONTHS_PER_YEAR = 12;
+// Phase 21: Game Time (RAPID SCALE)
+export const TICKS_PER_DAY = 300; // 60 ticks/sec × 5 sec = 1 game day
+export const DAYS_PER_MONTH = 6;
+export const MONTHS_PER_YEAR = 4;
 export const TICKS_PER_YEAR = TICKS_PER_DAY * DAYS_PER_MONTH * MONTHS_PER_YEAR;
 
 export enum EntityState {

@@ -86,7 +86,15 @@ export function runLifecycleSystem(
     if (S.tickCount % 60 === 0) {
       const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS + 0];
       if (gid >= 0 && gid < C.MAX_GROUPS && S.starvingGroups[gid] === 1) {
-        S.health[i] -= 10;
+        S.health[i] -= 2; // Reduced from 10 to make it less harsh
+      }
+    }
+
+    // 1.5 Natural Aging (RAPID SCALE)
+    if (S.tickCount % C.TICKS_PER_YEAR === 0) {
+      const age = Math.floor(S.tickCount / C.TICKS_PER_YEAR);
+      if (age > 60) {
+        S.health[i] -= Math.max(0, Math.floor((age - 60) / 2));
       }
     }
 
@@ -95,22 +103,7 @@ export function runLifecycleSystem(
       S.mana[i] = Math.min(100, S.mana[i] + 5);
     }
 
-    // Territorial Attrition
-    if (S.tickCount % 60 === 0) {
-      const tx = Math.floor(S.positionX[i] / C.TILE_SIZE),
-        ty = Math.floor(S.positionY[i] / C.TILE_SIZE);
-      const tileIdx = ty * C.WORLD_MAP_COLS + tx;
-      if (tileIdx >= 0 && tileIdx < S.territoryOwnerMap.length) {
-        const owner = S.territoryOwnerMap[tileIdx];
-        if (owner !== -1) {
-          const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS];
-          if (gid !== -1 && owner !== gid) {
-            const rel = S.groupRelationsMatrix[gid * C.MAX_GROUPS + owner];
-            if (rel < -20) S.health[i] -= 2;
-          }
-        }
-      }
-    }
+    // ... (rest of territorial logic) ...
 
     // 2. Autonomy State Machine (Decision Making)
     if (
@@ -122,33 +115,41 @@ export function runLifecycleSystem(
       const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS + 0];
       let survivalTask: number = -1;
 
-      // Hunger/Survival Check
+      // Growth-Driven Hunger Check
       if (gid >= 0 && gid < C.MAX_GROUPS) {
         const groupFood = S.groupFood[gid];
         const pop = S.groupPopulationCount[gid];
-        const foodNeeded = Math.max(1, Math.floor(pop * 0.1));
-        if (groupFood > 0 && groupFood < foodNeeded * 5) {
-          const bushId = U.findNearest(
+        const capacity = Math.max(20, S.groupHouseCapacity[gid]);
+
+        // Only seek food if group needs more (below capacity) AND food is low (< 1000 buffer)
+        const needsGrowth = pop < capacity && groupFood < 1000;
+
+        if (needsGrowth && Math.random() > 0.98) {
+          // Check domestic fields first
+          const fieldId = U.findNearestBuilding(
             S.positionX[i],
             S.positionY[i],
-            500,
-            C.TRAIT_BUSH,
+            300,
+            C.BuildingType.Field,
+            gid,
           );
-          if (bushId !== -1) {
-            survivalTask = 0;
-            S.targetEntityId[i] = bushId;
-            S.targetBuildingId[i] = -1;
+          if (fieldId !== -1) {
+            survivalTask = 1;
+            S.targetBuildingId[i] = fieldId;
+            S.charTool[i] = 2; // Food
           } else {
-            const fieldId = U.findNearestBuilding(
+            // Then wild bushes
+            const bushId = U.findNearestWithTrait(
               S.positionX[i],
               S.positionY[i],
-              500,
-              C.BuildingType.Field,
+              200,
+              C.TRAIT_BUSH,
             );
-            if (fieldId !== -1 && S.bldOwnerGroup[fieldId] === gid) {
-              survivalTask = 1;
-              S.targetBuildingId[i] = fieldId;
-              S.targetEntityId[i] = -1;
+            if (bushId !== -1) {
+              survivalTask = 0;
+              S.targetEntityId[i] = bushId;
+              S.charTool[i] = 2; // Food
+              S.targetBuildingId[i] = -1;
             }
           }
         }

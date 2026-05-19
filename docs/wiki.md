@@ -86,10 +86,11 @@ Deposit Interaction (Atomic additions into warehouse generic data registers)
 
 ### **Survival & Consumption Metrics**
 
-- **Base Consumption**: Groups consume food reserves based on active population:
-  $$\text{Food Required} = \max(1, \lfloor\text{Group Population} \times 0.1\rfloor) \text{ per 60 ticks}$$
-- **Starvation Penalty**: If a group's warehouse food reserves (`bldDataC`) hit 0, all group members take -10 damage points every 60 ticks.
-- **Reproduction Thresholds**: If a group has a positive population below its structural capacity, and controls a total wealth value exceeding 1,000 gold, it spends 500 gold to spawn a new character at its primary warehouse coordinates.
+- **Food as Fuel**: Food is no longer required for survival. Characters do not die of hunger. Instead, Food is treated as a strategic resource required for population growth and expansion.
+- **Base Consumption**: Groups consume food reserves daily (every 300 ticks) to maintain their current population:
+  $$\text{Food Required} = \text{Group Population} \text{ per day}$$
+- **Natural Aging**: Characters have a natural lifecycle. After reaching **60 game years**, entities begin taking incremental biological damage daily, ensuring generational turnover and natural death typically between 80-100 years.
+- **Reproduction Costs**: Spawning a new character requires a significant resource investment. If a group is below its structural capacity, it must spend **500 Food** and **200 Wood** (deducted from warehouses) to produce a new citizen.
 
 ## **Character Stats & Lifespan**
 
@@ -99,9 +100,21 @@ Characters are tracked via flat arrays mapping IDs to numeric values.
 
 To prevent expensive per-tick compound evaluations, characters store their raw innate biological parameters in base arrays, while calculating actual values into effective arrays when equipment or active buffs change:
 
-- `lifespan` vs. `effectiveLifespan` (Base average 60 to 80 years)
+- `lifespan` vs. `effectiveLifespan` (Base average 60 to 100 years)
 - `damage` vs. `effectiveDamage` (Base average 8 to 12)
 - `speed` vs. `effectiveSpeed` (Base average 0.8 to 1.2)
+
+### **Rapid Time Scale**
+
+The simulation uses a compressed calendar to accelerate societal evolution:
+
+| In-Game Unit | Ticks | Real-Time Duration |
+| :----------- | :---- | :----------------- |
+| **1 Day**    | 300   | **5.0 Seconds**    |
+| **1 Month**  | 1,800 | **30.0 Seconds**   |
+| **1 Year**   | 7,200 | **2.0 Minutes**    |
+
+_Average character lifespan (80 years) translates to approximately 160 minutes of real-time play._
 
 ### **Dynamic Stats Recalculation**
 

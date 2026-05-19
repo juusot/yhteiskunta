@@ -51,4 +51,74 @@ self.onmessage = (e: MessageEvent) => {
       self.postMessage({ type: "ENTITIES_PAYLOAD", data: [] });
     }
   }
+
+  if (type === "HOVER_QUERY") {
+    const { x, y, radius, screenX, screenY } = payload;
+
+    if (!S.spatialHead) return;
+
+    const cellX = Math.max(
+      0,
+      Math.min(C.GRID_COLS - 1, Math.floor(x / C.GRID_SIZE)),
+    );
+    const cellY = Math.max(
+      0,
+      Math.min(C.GRID_ROWS - 1, Math.floor(y / C.GRID_SIZE)),
+    );
+    const cellIndex = cellY * C.GRID_COLS + cellX;
+
+    let closestId = -1;
+    let closestType = "";
+    let closestDesc = "";
+    let minDistSq = radius * radius;
+
+    // 1. Check Buildings
+    let bldId = S.bldSpatialHead[cellIndex];
+    while (bldId !== -1) {
+      const dx = S.bldPositionX[bldId] - x;
+      const dy = S.bldPositionY[bldId] - y;
+      const distSq = dx * dx + dy * dy;
+
+      if (distSq < minDistSq) {
+        minDistSq = distSq;
+        closestId = bldId;
+        closestType = "Building";
+        const types = ["", "Warehouse", "House", "Tower", "Wall", "Field"];
+        const typeName = types[S.bldType[bldId]] || "Unknown";
+        closestDesc = `${typeName} | HP: ${S.bldHealth[bldId]} | Owner: Grp ${S.bldOwnerGroup[bldId]}`;
+      }
+      bldId = S.bldSpatialNext[bldId];
+    }
+
+    // 2. Check Characters (Entities)
+    let entId = S.spatialHead[cellIndex];
+    while (entId !== -1) {
+      const dx = S.positionX[entId] - x;
+      const dy = S.positionY[entId] - y;
+      const distSq = dx * dx + dy * dy;
+
+      if (distSq < minDistSq) {
+        minDistSq = distSq;
+        closestId = entId;
+        closestType = "Character";
+        closestDesc = `Entity ${entId} | HP: ${S.health[entId]} | Faction: ${S.groupAffiliations[entId * C.MAX_GROUP_CHANNELS]}`;
+      }
+      entId = S.spatialNext[entId];
+    }
+
+    if (closestId !== -1) {
+      self.postMessage({
+        type: "HOVER_RESULT",
+        data: {
+          id: closestId,
+          entityType: closestType,
+          desc: closestDesc,
+          screenX,
+          screenY,
+        },
+      });
+    } else {
+      self.postMessage({ type: "HOVER_RESULT", data: null });
+    }
+  }
 };

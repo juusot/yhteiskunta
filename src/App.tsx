@@ -127,6 +127,13 @@ export const App: React.FC<AppProps> = ({
   const [isPaused, setIsPaused] = useState(false);
 
   const [visibleEntities, setVisibleEntities] = useState<any[]>([]);
+  const [hoverData, setHoverData] = useState<{
+    id: number;
+    entityType: string;
+    desc: string;
+    screenX: number;
+    screenY: number;
+  } | null>(null);
 
   useEffect(() => {
     (window as any).brushState = {
@@ -146,6 +153,9 @@ export const App: React.FC<AppProps> = ({
     const handleMessage = (e: MessageEvent) => {
       if (e.data.type === "ENTITIES_PAYLOAD") {
         setVisibleEntities(e.data.data);
+      }
+      if (e.data.type === "HOVER_RESULT") {
+        setHoverData(e.data.data);
       }
     };
     uiWorker.addEventListener("message", handleMessage);
@@ -338,9 +348,13 @@ export const App: React.FC<AppProps> = ({
     document.getElementById("btn-toggle-loop")?.click();
   };
 
-  const gameDay = (Math.floor(tickCount / 3600) % 30) + 1;
-  const gameMonth = (Math.floor(tickCount / (3600 * 30)) % 12) + 1;
-  const gameYear = Math.floor(tickCount / (3600 * 30 * 12)) + 1;
+  const gameDay =
+    (Math.floor(tickCount / C.TICKS_PER_DAY) % C.DAYS_PER_MONTH) + 1;
+  const gameMonth =
+    (Math.floor(tickCount / (C.TICKS_PER_DAY * C.DAYS_PER_MONTH)) %
+      C.MONTHS_PER_YEAR) +
+    1;
+  const gameYear = Math.floor(tickCount / C.TICKS_PER_YEAR);
 
   const totalPop = groups.reduce((a, g) => a + g.population, 0);
 
@@ -936,6 +950,19 @@ export const App: React.FC<AppProps> = ({
           {isWindowOpen ? "close" : "menu"}
         </span>
       </button>
+
+      {/* Floating Hover Tooltip */}
+      {hoverData && (
+        <div
+          className="fixed pointer-events-none bg-surface-container-highest border-2 border-on-surface p-2 shadow-brutal-sm z-[100] font-mono text-[10px] text-on-surface flex flex-col gap-1"
+          style={{ left: hoverData.screenX + 15, top: hoverData.screenY + 15 }}
+        >
+          <strong className="uppercase">
+            {hoverData.entityType} #{hoverData.id}
+          </strong>
+          <span>{hoverData.desc}</span>
+        </div>
+      )}
     </div>
   );
 };

@@ -30,8 +30,9 @@ export function findNearest(
         itemsChecked++;
         if (itemsChecked >= 64) break;
         if (
-          filterBitmask === 0xffffffff ||
-          (S.traitBitmask[entityId] & filterBitmask) !== 0
+          S.state[entityId] !== C.EntityState.Dead &&
+          (filterBitmask === 0xffffffff ||
+            (S.traitBitmask[entityId] & filterBitmask) !== 0)
         ) {
           const dx = S.positionX[entityId] - x;
           const dy = S.positionY[entityId] - y;
@@ -50,15 +51,13 @@ export function findNearest(
   return closestId;
 }
 
-export function findNearestBuilding(
+export function findNearestWithTrait(
   x: number,
   y: number,
   radius: number,
-  typeFilter: number,
+  traitMask: number,
 ): number {
   const radiusSq = radius * radius;
-  let minDistanceSq = radiusSq + 1;
-  let closestId = -1;
   const minCellX = Math.max(0, Math.floor((x - radius) / C.GRID_SIZE));
   const maxCellX = Math.min(
     C.GRID_COLS - 1,
@@ -69,28 +68,79 @@ export function findNearestBuilding(
     C.GRID_ROWS - 1,
     Math.floor((y + radius) / C.GRID_SIZE),
   );
-  let itemsChecked = 0;
+
+  let closestId = -1;
+  let minDist = radiusSq;
+
   for (let cy = minCellY; cy <= maxCellY; cy++) {
     for (let cx = minCellX; cx <= maxCellX; cx++) {
       const cellIndex = cy * C.GRID_COLS + cx;
-      let bldId = S.bldSpatialHead[cellIndex];
-      while (bldId !== -1) {
-        itemsChecked++;
-        if (itemsChecked >= 64) break;
-        if (typeFilter === -1 || S.bldType[bldId] === typeFilter) {
-          const dx = S.bldPositionX[bldId] - x;
-          const dy = S.bldPositionY[bldId] - y;
-          const distSq = dx * dx + dy * dy;
-          if (distSq < minDistanceSq && distSq <= radiusSq) {
-            minDistanceSq = distSq;
-            closestId = bldId;
+      let id = S.spatialHead[cellIndex];
+
+      while (id !== -1) {
+        if (
+          S.state[id] !== C.EntityState.Dead &&
+          (S.traitBitmask[id] & traitMask) !== 0
+        ) {
+          const dx = S.positionX[id] - x;
+          const dy = S.positionY[id] - y;
+          const dist = dx * dx + dy * dy;
+          if (dist < minDist) {
+            minDist = dist;
+            closestId = id;
           }
         }
-        bldId = S.bldSpatialNext[bldId];
+        id = S.spatialNext[id];
       }
-      if (itemsChecked >= 64) break;
     }
-    if (itemsChecked >= 64) break;
+  }
+  return closestId;
+}
+
+export function findNearestBuilding(
+  x: number,
+  y: number,
+  radius: number,
+  type: number,
+  groupId: number,
+): number {
+  const radiusSq = radius * radius;
+  const minCellX = Math.max(0, Math.floor((x - radius) / C.GRID_SIZE));
+  const maxCellX = Math.min(
+    C.GRID_COLS - 1,
+    Math.floor((x + radius) / C.GRID_SIZE),
+  );
+  const minCellY = Math.max(0, Math.floor((y - radius) / C.GRID_SIZE));
+  const maxCellY = Math.min(
+    C.GRID_ROWS - 1,
+    Math.floor((y + radius) / C.GRID_SIZE),
+  );
+
+  let closestId = -1;
+  let minDist = radiusSq;
+
+  for (let cy = minCellY; cy <= maxCellY; cy++) {
+    for (let cx = minCellX; cx <= maxCellX; cx++) {
+      const cellIndex = cy * C.GRID_COLS + cx;
+      let id = S.bldSpatialHead[cellIndex];
+
+      while (id !== -1) {
+        if (
+          S.bldHealth[id] > 0 &&
+          S.bldType[id] === type &&
+          S.bldOwnerGroup[id] === groupId
+        ) {
+          const dx = S.bldPositionX[id] - x;
+          const dy = S.bldPositionY[id] - y;
+          const dist = dx * dx + dy * dy;
+          if (dist < minDist) {
+            minDist = dist;
+            closestId = id;
+          }
+        }
+        id = S.bldSpatialNext[id];
+      }
+    }
   }
   return closestId;
 }

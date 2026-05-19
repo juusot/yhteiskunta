@@ -4,6 +4,7 @@ import React from "react";
 import { App } from "./App";
 import { writeFile, readFile } from "@tauri-apps/plugin-fs";
 import { save, open } from "@tauri-apps/plugin-dialog";
+import * as C from "./simulation/constants";
 import {
   MAX_ENTITIES,
   MAX_GROUPS,
@@ -757,6 +758,33 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  let lastHoverTime = 0;
+  canvas.addEventListener("mousemove", (event) => {
+    const now = performance.now();
+    if (now - lastHoverTime < 50) return; // Throttle to 20 updates per second
+    lastHoverTime = now;
+
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
+
+    // Convert to world coordinates
+    const worldX = cameraX + mouseX / zoom;
+    const worldY = cameraY + mouseY / zoom;
+
+    // Send to UI worker (assumes uiWorker is accessible in this scope)
+    uiWorker.postMessage({
+      type: "HOVER_QUERY",
+      payload: {
+        x: worldX,
+        y: worldY,
+        radius: 15, // Detection radius
+        screenX: event.clientX,
+        screenY: event.clientY,
+      },
+    });
+  });
+
   canvas.addEventListener("click", (e) => {
     if (
       uiPopup.classList.contains("visible") ||
@@ -1253,9 +1281,13 @@ window.addEventListener("DOMContentLoaded", () => {
             tickTimes.reduce((a, b) => a + b, 0) / tickTimes.length;
 
           // Update game time display
-          const gameDay = (Math.floor(tickCount / 3600) % 30) + 1;
-          const gameMonth = (Math.floor(tickCount / (3600 * 30)) % 12) + 1;
-          const gameYear = Math.floor(tickCount / (3600 * 30 * 12)) + 1;
+          const gameDay =
+            (Math.floor(tickCount / C.TICKS_PER_DAY) % C.DAYS_PER_MONTH) + 1;
+          const gameMonth =
+            (Math.floor(tickCount / (C.TICKS_PER_DAY * C.DAYS_PER_MONTH)) %
+              C.MONTHS_PER_YEAR) +
+            1;
+          const gameYear = Math.floor(tickCount / C.TICKS_PER_YEAR);
           gameTimeDisplay.textContent = `Day ${gameDay}, Month ${gameMonth}, Year ${gameYear}`;
 
           isTickInProgress = false;
