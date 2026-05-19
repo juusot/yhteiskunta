@@ -1,5 +1,6 @@
 import * as C from "../constants";
 import * as S from "../state";
+import * as U from "../utils";
 
 /**
  * Movement System
@@ -36,6 +37,8 @@ export function runMovementSystem(
     );
     const tileIdx = ty * C.WORLD_MAP_COLS + tx;
     let blocked = false;
+
+    // 1. Terrain Block Check
     if (tileIdx >= 0 && tileIdx < S.worldMap.length) {
       const terrain = S.worldMap[tileIdx];
       if (
@@ -49,6 +52,32 @@ export function runMovementSystem(
       } else if (terrain === C.TerrainType.Water) {
         moveX *= 0.3;
         moveY *= 0.3;
+      }
+    }
+
+    // 2. Building Block Check (Spatial Query)
+    if (!blocked) {
+      const nearbyBldId = U.findNearestBuilding(nextX, nextY, 15, -1, -1);
+      if (nearbyBldId !== -1) {
+        const bType = S.bldType[nearbyBldId];
+        if (bType === 1 || bType === 2 || bType === 3 || bType === 4) {
+          const bRadius = bType === 1 ? 8.0 : 5.0; // Match shader half-extents
+          const bX = S.bldPositionX[nearbyBldId];
+          const bY = S.bldPositionY[nearbyBldId];
+          const bdx = bX - nextX;
+          const bdy = bY - nextY;
+          const nextDistSq = bdx * bdx + bdy * bdy;
+
+          if (nextDistSq < bRadius * bRadius) {
+            // Potential collision. Only block if we are moving CLOSER to the center.
+            const curDx = bX - S.positionX[i];
+            const curDy = bY - S.positionY[i];
+            const curDistSq = curDx * curDx + curDy * curDy;
+            if (nextDistSq < curDistSq) {
+              blocked = true;
+            }
+          }
+        }
       }
     }
 

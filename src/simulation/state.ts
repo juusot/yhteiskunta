@@ -34,6 +34,7 @@ export let charTool: Int32Array;
 export let lifespan: Int16Array; // Base years (default: 80)
 export let damage: Int16Array; // Base damage (default: 10)
 export let speed: Float32Array; // Base movement multiplier (default: 1.0)
+export let charBirthTick: Int32Array; // Tick when character was born
 
 // Phase 21: Effective Stats (cached, updated on buff change)
 export let effectiveLifespan: Int16Array; // Base + buffs
@@ -253,6 +254,8 @@ export function initializeState(): void {
   lifespan = new Int16Array(new SharedArrayBuffer(C.MAX_ENTITIES * 2));
   damage = new Int16Array(new SharedArrayBuffer(C.MAX_ENTITIES * 2));
   speed = new Float32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
+  charBirthTick = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
+
   effectiveLifespan = new Int16Array(new SharedArrayBuffer(C.MAX_ENTITIES * 2));
   effectiveDamage = new Int16Array(new SharedArrayBuffer(C.MAX_ENTITIES * 2));
   effectiveSpeed = new Float32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
@@ -453,6 +456,8 @@ export function mapStateBuffers(buffers: any): void {
   lifespan = new Int16Array(buffers.lifespan);
   damage = new Int16Array(buffers.damage);
   speed = new Float32Array(buffers.speed);
+  charBirthTick = new Int32Array(buffers.charBirthTick);
+
   effectiveLifespan = new Int16Array(buffers.effectiveLifespan);
   effectiveDamage = new Int16Array(buffers.effectiveDamage);
   effectiveSpeed = new Float32Array(buffers.effectiveSpeed);

@@ -1,5 +1,6 @@
 import * as C from "../constants";
 import * as S from "../state";
+import * as U from "../utils";
 
 /**
  * Steering System
@@ -121,124 +122,202 @@ export function runSteeringSystem(
     }
 
     // Standard State-based Steering
+    let targetX = -1,
+      targetY = -1,
+      stopDistSq = 4.0;
+    const speed = S.effectiveSpeed[i] || 1.0;
+
     if (S.state[i] === C.EntityState.Idle) {
       if (Math.random() > 0.98) {
         S.velocityX[i] = (Math.random() - 0.5) * 2;
         S.velocityY[i] = (Math.random() - 0.5) * 2;
       }
+      continue;
     } else if (S.state[i] === C.EntityState.Fleeing && targetId !== -1) {
-      const enemyX = S.positionX[targetId],
-        enemyY = S.positionY[targetId];
-      const dx = S.positionX[i] - enemyX,
-        dy = S.positionY[i] - enemyY;
+      const dx = S.positionX[i] - S.positionX[targetId],
+        dy = S.positionY[i] - S.positionY[targetId];
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist > 0.1) {
-        S.velocityX[i] = (dx / dist) * 2.5;
-        S.velocityY[i] = (dy / dist) * 2.5;
+        S.velocityX[i] = (dx / dist) * speed * 2.0;
+        S.velocityY[i] = (dy / dist) * speed * 2.0;
       }
+      continue;
     } else if (S.state[i] === C.EntityState.Harvesting) {
       const bldId = S.targetBuildingId[i];
-      let tx = 0,
-        ty = 0;
       if (bldId !== -1) {
-        tx = S.bldPositionX[bldId];
-        ty = S.bldPositionY[bldId];
+        targetX = S.bldPositionX[bldId];
+        targetY = S.bldPositionY[bldId];
       } else if (targetId !== -1) {
-        tx = S.positionX[targetId];
-        ty = S.positionY[targetId];
+        targetX = S.positionX[targetId];
+        targetY = S.positionY[targetId];
       }
-      const dx = tx - S.positionX[i],
-        dy = ty - S.positionY[i];
-      const distSq = dx * dx + dy * dy;
-      if (distSq < 4.0) {
-        S.velocityX[i] = 0;
-        S.velocityY[i] = 0;
-      } else {
-        const dist = Math.sqrt(distSq);
-        S.velocityX[i] = (dx / dist) * 1.8;
-        S.velocityY[i] = (dy / dist) * 1.8;
-      }
+      stopDistSq = 4.0;
     } else if (
       S.state[i] === C.EntityState.ReturningToDepot ||
       S.state[i] === C.EntityState.Construction
     ) {
+      const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS];
       const bldId = S.targetBuildingId[i];
+      let bX = -1,
+        bY = -1,
+        bRad = 8.0;
+
       if (bldId !== -1) {
-        const dx = S.bldPositionX[bldId] - S.positionX[i],
-          dy = S.bldPositionY[bldId] - S.positionY[i];
-        const distSq = dx * dx + dy * dy;
-        if (distSq < 16.0) {
-          S.velocityX[i] = 0;
-          S.velocityY[i] = 0;
+        bX = S.bldPositionX[bldId];
+        bY = S.bldPositionY[bldId];
+        bRad = S.bldType[bldId] === 1 ? 12.0 : 8.0;
+      } else {
+        const whId = U.findNearestBuilding(
+          S.positionX[i],
+          S.positionY[i],
+          1500,
+          1,
+          gid,
+        );
+        if (whId !== -1) {
+          bX = S.bldPositionX[whId];
+          bY = S.bldPositionY[whId];
+          bRad = 12.0;
         } else {
-          const dist = Math.sqrt(distSq);
-          S.velocityX[i] = (dx / dist) * 1.8;
-          S.velocityY[i] = (dy / dist) * 1.8;
+          bX = S.groupWarehouseX[gid];
+          bY = S.groupWarehouseY[gid];
+          bRad = 12.0;
         }
+      }
+
+      if (bX !== -1) {
+        // Target a unique point on a ring around the building
+        const angle = (i * 0.618033) % (Math.PI * 2); // Golden ratio spread
+        targetX = bX + Math.cos(angle) * bRad;
+        targetY = bY + Math.sin(angle) * bRad;
+        stopDistSq = 9.0; // Stop within 3 units of the ring point
       }
     } else if (S.state[i] === C.EntityState.Combat) {
       const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS];
-      const tx = S.groupTargetX[gid],
-        ty = S.groupTargetY[gid];
-      const dx = tx - S.positionX[i],
-        dy = ty - S.positionY[i];
-      const distSq = dx * dx + dy * dy;
-      if (distSq < 256.0) {
-        S.velocityX[i] = 0;
-        S.velocityY[i] = 0;
-      } else {
-        const dist = Math.sqrt(distSq);
-        S.velocityX[i] = (dx / dist) * 2.0;
-        S.velocityY[i] = (dy / dist) * 2.0;
-      }
+      targetX = S.groupTargetX[gid];
+      targetY = S.groupTargetY[gid];
+      stopDistSq = 256.0;
     } else if (S.state[i] === C.EntityState.Trading) {
       const targetGid = -S.targetEntityId[i] - 1000;
       if (targetGid >= 0 && targetGid < C.MAX_GROUPS) {
-        const tx = S.groupWarehouseX[targetGid],
-          ty = S.groupWarehouseY[targetGid];
-        const dx = tx - S.positionX[i],
-          dy = ty - S.positionY[i];
-        const distSq = dx * dx + dy * dy;
-        if (distSq < 16.0) {
-          S.velocityX[i] = 0;
-          S.velocityY[i] = 0;
-        } else {
-          const dist = Math.sqrt(distSq);
-          S.velocityX[i] = (dx / dist) * 1.8;
-          S.velocityY[i] = (dy / dist) * 1.8;
-        }
+        targetX = S.groupWarehouseX[targetGid];
+        targetY = S.groupWarehouseY[targetGid];
       }
+      stopDistSq = 16.0;
     } else if (S.state[i] === C.EntityState.ReportingIntel) {
       const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS];
-      const tx = S.groupWarehouseX[gid],
-        ty = S.groupWarehouseY[gid];
-      const dx = tx - S.positionX[i],
-        dy = ty - S.positionY[i];
-      const distSq = dx * dx + dy * dy;
-      if (distSq > 1.0) {
-        const dist = Math.sqrt(distSq);
-        S.velocityX[i] = (dx / dist) * 1.8;
-        S.velocityY[i] = (dy / dist) * 1.8;
-      } else {
-        S.velocityX[i] = 0;
-        S.velocityY[i] = 0;
-      }
+      targetX = S.groupWarehouseX[gid];
+      targetY = S.groupWarehouseY[gid];
+      stopDistSq = 1.0;
     } else if (S.state[i] === C.EntityState.Looting) {
       const targetItem = S.targetItemId[i];
       if (targetItem !== -1 && targetItem < C.MAX_ITEM_INSTANCES) {
-        const dx = S.itemInstanceX[targetItem] - S.positionX[i],
-          dy = S.itemInstanceY[targetItem] - S.positionY[i];
-        const distSq = dx * dx + dy * dy;
-        if (distSq > 4.0) {
-          const dist = Math.sqrt(distSq);
-          const speed = S.effectiveSpeed[i] || 1.8;
-          S.velocityX[i] = (dx / dist) * speed;
-          S.velocityY[i] = (dy / dist) * speed;
-        } else {
-          S.velocityX[i] = 0;
-          S.velocityY[i] = 0;
-        }
+        targetX = S.itemInstanceX[targetItem];
+        targetY = S.itemInstanceY[targetItem];
       }
+      stopDistSq = 4.0;
+    }
+
+    if (targetX !== -1) {
+      const dx = targetX - S.positionX[i],
+        dy = targetY - S.positionY[i];
+      const distSq = dx * dx + dy * dy;
+
+      if (distSq < stopDistSq) {
+        S.velocityX[i] = 0;
+        S.velocityY[i] = 0;
+      } else {
+        const dist = Math.sqrt(distSq);
+        let vx = (dx / dist) * speed * 1.5;
+        let vy = (dy / dist) * speed * 1.5;
+
+        // --- INTELLIGENT OBSTACLE AVOIDANCE ---
+        // Look ahead 1 tile
+        const lookAhead = 12.0;
+        const lax = S.positionX[i] + vx * lookAhead;
+        const lay = S.positionY[i] + vy * lookAhead;
+
+        let blockedByBuilding = false;
+        const nearbyBldId = U.findNearestBuilding(lax, lay, 15, -1, -1);
+        if (nearbyBldId !== -1) {
+          const bType = S.bldType[nearbyBldId];
+          if (bType === 1 || bType === 2 || bType === 3 || bType === 4) {
+            const bRadius = bType === 1 ? 8.0 : 5.0;
+            const bdx = S.bldPositionX[nearbyBldId] - lax;
+            const bdy = S.bldPositionY[nearbyBldId] - lay;
+            if (bdx * bdx + bdy * bdy < bRadius * bRadius) {
+              blockedByBuilding = true;
+            }
+          }
+        }
+
+        const tx = Math.floor(lax / 10),
+          ty = Math.floor(lay / 10);
+
+        if (
+          blockedByBuilding ||
+          (tx >= 0 && tx < C.WORLD_MAP_COLS && ty >= 0 && ty < C.WORLD_MAP_ROWS)
+        ) {
+          let terrainBlock = false;
+          if (!blockedByBuilding) {
+            const terrain = S.worldMap[ty * C.WORLD_MAP_COLS + tx];
+            if (
+              terrain === C.TerrainType.Mountain ||
+              terrain === C.TerrainType.Ocean
+            )
+              terrainBlock = true;
+          }
+
+          if (blockedByBuilding || terrainBlock) {
+            // Path is blocked! Find nearest navigable neighbor and deflect
+            let bestAx = 0,
+              bestAy = 0,
+              found = false;
+            for (let ay = -2; ay <= 2; ay++) {
+              // Wider search for building avoidance
+              for (let ax = -2; ax <= 2; ax++) {
+                if (ax === 0 && ay === 0) continue;
+                const nx = Math.floor(S.positionX[i] / 10) + ax;
+                const ny = Math.floor(S.positionY[i] / 10) + ay;
+                if (
+                  nx >= 0 &&
+                  nx < C.WORLD_MAP_COLS &&
+                  ny >= 0 &&
+                  ny < C.WORLD_MAP_ROWS
+                ) {
+                  const nt = S.worldMap[ny * C.WORLD_MAP_COLS + nx];
+                  if (
+                    nt !== C.TerrainType.Mountain &&
+                    nt !== C.TerrainType.Ocean
+                  ) {
+                    // Also ensure neighbor isn't blocked by building
+                    const npx = nx * 10 + 5,
+                      npy = ny * 10 + 5;
+                    const nbId = U.findNearestBuilding(npx, npy, 10, -1, -1);
+                    if (nbId === -1 || S.bldHealth[nbId] === 0) {
+                      bestAx = ax;
+                      bestAy = ay;
+                      found = true;
+                      break;
+                    }
+                  }
+                }
+              }
+              if (found) break;
+            }
+            if (found) {
+              vx = (vx + bestAx * speed * 2.5) / 2;
+              vy = (vy + bestAy * speed * 2.5) / 2;
+            }
+          }
+        }
+
+        S.velocityX[i] = vx;
+        S.velocityY[i] = vy;
+      }
+    } else {
+      S.velocityX[i] = 0;
+      S.velocityY[i] = 0;
     }
   }
 }

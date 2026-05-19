@@ -82,6 +82,11 @@ window.addEventListener("DOMContentLoaded", () => {
   const uCam = new Float32Array([0, 0, 0, 0]);
   const uRes = new Float32Array([0, 0]);
 
+  let cameraX = 0,
+    cameraY = 0,
+    zoom = 1.0;
+  let initialViewSet = false;
+
   function resizeCanvas() {
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
@@ -90,6 +95,17 @@ window.addEventListener("DOMContentLoaded", () => {
     gl.viewport(0, 0, canvas.width, canvas.height);
     uRes[0] = canvas.width;
     uRes[1] = canvas.height;
+
+    if (!initialViewSet && canvas.width > 0) {
+      // Zoom out to fit the whole world with a small margin
+      zoom =
+        Math.min(canvas.width / C.WORLD_WIDTH, canvas.height / C.WORLD_HEIGHT) *
+        0.9;
+      // Center the camera
+      cameraX = C.WORLD_WIDTH / 2 - canvas.width / 2 / zoom;
+      cameraY = C.WORLD_HEIGHT / 2 - canvas.height / 2 / zoom;
+      initialViewSet = true;
+    }
   }
   window.addEventListener("resize", resizeCanvas);
   resizeCanvas();
@@ -160,11 +176,13 @@ window.addEventListener("DOMContentLoaded", () => {
         float idx = float(gl_InstanceID);
         float cols = float(${MAP_COLS});
         vec2 gridPos = vec2(mod(idx, cols), floor(idx / cols));
-        vec2 worldPos = gridPos * 10.0;
+        // Center of the 10x10 tile
+        vec2 worldPos = (gridPos + 0.5) * 10.0;
         vec2 screenPos = (worldPos - u_camera.xy) * u_camera.z;
         vec2 clipPos = (screenPos / u_resolution) * 2.0 - 1.0;
         clipPos.y = -clipPos.y;
-        gl_Position = vec4(clipPos + (a_pos * 10.0 * u_camera.z / u_resolution), 0.0, 1.0);
+        // Tile size is 10 units (half-extent 5.0). Multiply by 2.0 for clip space scale.
+        gl_Position = vec4(clipPos + (a_pos * 5.0 * 2.0 * u_camera.z / u_resolution), 0.0, 1.0);
         v_type = a_type;
     }`;
 
@@ -197,11 +215,11 @@ window.addEventListener("DOMContentLoaded", () => {
         float idx = float(gl_InstanceID);
         float cols = float(${MAP_COLS});
         vec2 gridPos = vec2(mod(idx, cols), floor(idx / cols));
-        vec2 worldPos = gridPos * 10.0;
+        vec2 worldPos = (gridPos + 0.5) * 10.0;
         vec2 screenPos = (worldPos - u_camera.xy) * u_camera.z;
         vec2 clipPos = (screenPos / u_resolution) * 2.0 - 1.0;
         clipPos.y = -clipPos.y;
-        gl_Position = vec4(clipPos + (a_pos * 10.0 * u_camera.z / u_resolution), 0.0, 1.0);
+        gl_Position = vec4(clipPos + (a_pos * 5.0 * 2.0 * u_camera.z / u_resolution), 0.0, 1.0);
         v_owner = a_owner;
         v_strength = a_strength;
         v_border = a_border;
@@ -217,16 +235,19 @@ window.addEventListener("DOMContentLoaded", () => {
     in float v_zoom;
     in vec2 v_localPos;
     out vec4 outColor;
+
+    vec3 getGroupColor(float id) {
+        if (id == -1.0) return vec3(0.5);
+        float r = fract(sin(id * 12.9898) * 43758.5453);
+        float g = fract(sin(id * 78.233) * 43758.5453);
+        float b = fract(sin(id * 37.719) * 43758.5453);
+        return vec3(r, g, b) * 0.8 + 0.2; // Brighter colors
+    }
+
     void main() {
         if (v_owner == -1.0 || v_strength < 0.05) discard;
         
-        // Distinct colors for each nation
-        vec3 color;
-        if (v_owner == 0.0) color = vec3(0.9, 0.2, 0.2);      // Red
-        else if (v_owner == 1.0) color = vec3(0.2, 0.4, 0.9); // Blue  
-        else if (v_owner == 2.0) color = vec3(0.2, 0.7, 0.2); // Green
-        else if (v_owner == 3.0) color = vec3(0.9, 0.7, 0.1); // Yellow
-        else color = vec3(0.5, 0.5, 0.5);
+        vec3 color = getGroupColor(v_owner);
         
         // Fade fill when zoomed in
         float alpha = 0.35;
@@ -264,12 +285,12 @@ window.addEventListener("DOMContentLoaded", () => {
         clipPos.y = -clipPos.y;
         
         uint traits = uint(i_trait);
-        float size = 3.0; // Units
-        if ((traits & 1u) != 0u) size = 6.0; // Trees are bigger
-        else if ((traits & 2u) != 0u || (traits & 4u) != 0u) size = 3.5; // Gold/Bush
-        else if ((traits & 256u) != 0u) size = 4.0; // Loot
+        float size = 1.5; // Radius in units
+        if ((traits & 1u) != 0u) size = 3.0; // Trees
+        else if ((traits & 2u) != 0u || (traits & 4u) != 0u) size = 1.75; 
+        else if ((traits & 256u) != 0u) size = 2.0; 
         
-        gl_Position = vec4(clipPos + (a_pos * size * u_camera.z / u_resolution), 0.0, 1.0);
+        gl_Position = vec4(clipPos + (a_pos * size * 2.0 * u_camera.z / u_resolution), 0.0, 1.0);
         v_type = i_trait; v_group = i_group; v_health = i_health; v_uv = a_pos;
     }`;
 
@@ -277,6 +298,15 @@ window.addEventListener("DOMContentLoaded", () => {
     precision highp float;
     in float v_type; in float v_group; in float v_health; in vec2 v_uv;
     out vec4 outColor;
+
+    vec3 getGroupColor(float id) {
+        if (id == -1.0) return vec3(0.5);
+        float r = fract(sin(id * 12.9898) * 43758.5453);
+        float g = fract(sin(id * 78.233) * 43758.5453);
+        float b = fract(sin(id * 37.719) * 43758.5453);
+        return vec3(r, g, b) * 0.8 + 0.2;
+    }
+
     void main() {
         if (v_health <= 0.0) discard;
         uint traits = uint(v_type);
@@ -307,11 +337,7 @@ window.addEventListener("DOMContentLoaded", () => {
             // Units (Characters/Couriers/Scouts) - ALL CIRCLES
             float dist = length(v_uv);
             if (dist > 1.0) discard;
-            if (v_group == 0.0) color = vec3(1.0, 1.0, 0.0);
-            else if (v_group == 1.0) color = vec3(1.0, 0.0, 0.0);
-            else if (v_group == 2.0) color = vec3(0.0, 0.0, 1.0);
-            else if (v_group == 3.0) color = vec3(1.0, 0.0, 1.0);
-            else color = vec3(0.5, 0.5, 0.5);
+            color = getGroupColor(v_group);
             if (dist < 0.3) color *= 0.5; // Inner dot for "unit" feel
         }
         outColor = vec4(color, 1.0);
@@ -332,8 +358,8 @@ window.addEventListener("DOMContentLoaded", () => {
         vec2 screenPos = (worldPos - u_camera.xy) * u_camera.z;
         vec2 clipPos = (screenPos / u_resolution) * 2.0 - 1.0;
         clipPos.y = -clipPos.y;
-        float size = (i_type == 1.0) ? 16.0 : 10.0; // Warehouse is slightly larger
-        gl_Position = vec4(clipPos + (a_pos * size * u_camera.z / u_resolution), 0.0, 1.0);
+        float size = (i_type == 1.0) ? 8.0 : 5.0; // Radius in units
+        gl_Position = vec4(clipPos + (a_pos * size * 2.0 * u_camera.z / u_resolution), 0.0, 1.0);
         v_type = i_type; v_group = i_group; v_health = i_health; v_pos = a_pos;
     }`;
 
@@ -341,60 +367,83 @@ window.addEventListener("DOMContentLoaded", () => {
     precision highp float;
     in float v_type; in float v_group; in float v_health; in vec2 v_pos;
     out vec4 outColor;
+
+    vec3 getGroupColor(float id) {
+        if (id == -1.0) return vec3(0.5);
+        float r = fract(sin(id * 12.9898) * 43758.5453);
+        float g = fract(sin(id * 78.233) * 43758.5453);
+        float b = fract(sin(id * 37.719) * 43758.5453);
+        return vec3(r, g, b) * 0.8 + 0.2;
+    }
+
     void main() {
         if (v_health <= 0.0 || v_type == 0.0) discard;
         vec3 color = vec3(0.0);
-        
-        vec3 groupColor = vec3(0.4);
-        if (v_group == 0.0) groupColor = vec3(0.8, 0.8, 0.0);
-        else if (v_group == 1.0) groupColor = vec3(0.8, 0.0, 0.0);
-        else if (v_group == 2.0) groupColor = vec3(0.0, 0.0, 0.8);
-        else if (v_group == 3.0) groupColor = vec3(0.8, 0.0, 0.8);
+        float alpha = 1.0;
+        bool inProgressBar = false;
 
-        if (v_type == 2.0) { // House
-            bool isRoof = v_pos.y > 0.2;
-            if (isRoof) {
-                float roofWidth = 1.0 - (v_pos.y - 0.2) / 0.8;
-                if (abs(v_pos.x) > roofWidth) discard;
-                color = groupColor;
+        // --- PROGRESS BAR VISUALS ---
+        if (v_health < 1000.0) {
+            // Bar at the top of the footprint
+            bool isBarFrame = v_pos.y > 0.7 && v_pos.y < 0.9 && abs(v_pos.x) < 0.8;
+            if (isBarFrame) {
+                float pct = v_health / 1000.0;
+                float barX = (v_pos.x + 0.8) / 1.6; // 0 to 1
+                color = (barX < pct) ? vec3(0.2, 1.0, 0.2) : vec3(0.1, 0.1, 0.1);
+                alpha = 1.0;
+                inProgressBar = true;
             } else {
-                color = vec3(0.6, 0.5, 0.4);
-                bool isDoor = abs(v_pos.x) < 0.2 && v_pos.y < -0.4;
-                bool isWindow = v_pos.x > 0.4 && v_pos.y > -0.4 && v_pos.y < 0.0;
-                if (isDoor || isWindow) color *= 0.3;
+                alpha = mix(0.2, 0.6, v_health / 1000.0);
             }
-        } else if (v_type == 1.0) { // Castle / Warehouse
-            bool isTop = v_pos.y > 0.5;
-            if (isTop) {
-                // Crenellations (teeth)
-                float teeth = fract((v_pos.x + 1.0) * 3.5); 
-                if (teeth > 0.5 && v_pos.y > 0.75) discard;
-                color = groupColor;
-            } else {
-                color = vec3(0.55, 0.55, 0.55); // Grey stone
-                bool isGate = abs(v_pos.x) < 0.25 && v_pos.y < -0.2;
-                if (isGate) color *= 0.2; // Dark gate
-                
-                // Add two side banners in group colors
-                bool isBanner = abs(abs(v_pos.x) - 0.6) < 0.15 && v_pos.y > -0.1 && v_pos.y < 0.4;
-                if (isBanner) color = groupColor * 0.8;
-            }
-        } else if (v_type == 5.0) { // Field
-            color = vec3(0.8, 0.7, 0.2); // Wheat color
-            bool isRow = fract((v_pos.x + v_pos.y) * 4.0) > 0.5;
-            if (isRow) color *= 0.8;
-        } else if (v_type == 3.0 || v_type == 4.0) { // Tower or Wall
-            color = vec3(0.5, 0.5, 0.5);
-            if (v_type == 3.0 && abs(v_pos.x) > 0.6) discard; // Tower is tall and thin
-            if (v_pos.y > 0.6 && fract((v_pos.x + 1.0) * 4.0) > 0.5) discard; // Crenellations
-            if (v_type == 3.0 && v_pos.y > 0.4 && v_pos.y < 0.6) color = groupColor; // Tower band
-        } else {
-            color = vec3(0.3);
         }
 
-        if (v_health < 1000.0) color *= 0.7; // Darken if damaged/constructing
-        outColor = vec4(color, 1.0);
-    }`;
+        if (!inProgressBar) {
+            vec3 groupColor = getGroupColor(v_group);
+
+            if (v_type == 2.0) { // House
+                bool isRoof = v_pos.y > 0.2;
+                if (isRoof) {
+                    float roofWidth = 1.0 - (v_pos.y - 0.2) / 0.8;
+                    if (abs(v_pos.x) > roofWidth) discard;
+                    color = groupColor;
+                } else {
+                    color = vec3(0.6, 0.5, 0.4);
+                    bool isDoor = abs(v_pos.x) < 0.2 && v_pos.y < -0.4;
+                    bool isWindow = v_pos.x > 0.4 && v_pos.y > -0.4 && v_pos.y < 0.0;
+                    if (isDoor || isWindow) color *= 0.3;
+                }
+            } else if (v_type == 1.0) { // Castle / Warehouse
+                bool isTop = v_pos.y > 0.5;
+                if (isTop) {
+                    // Crenellations (teeth)
+                    float teeth = fract((v_pos.x + 1.0) * 3.5); 
+                    if (teeth > 0.5 && v_pos.y > 0.75) discard;
+                    color = groupColor;
+                } else {
+                    color = vec3(0.55, 0.55, 0.55); // Grey stone
+                    bool isGate = abs(v_pos.x) < 0.25 && v_pos.y < -0.2;
+                    if (isGate) color *= 0.2; // Dark gate
+                    
+                    // Add two side banners in group colors
+                    bool isBanner = abs(abs(v_pos.x) - 0.6) < 0.15 && v_pos.y > -0.1 && v_pos.y < 0.4;
+                    if (isBanner) color = groupColor * 0.8;
+                }
+            } else if (v_type == 5.0) { // Field
+                color = vec3(0.8, 0.7, 0.2); // Wheat color
+                bool isRow = fract((v_pos.x + v_pos.y) * 4.0) > 0.5;
+                if (isRow) color *= 0.8;
+            } else if (v_type == 3.0 || v_type == 4.0) { // Tower or Wall
+                color = vec3(0.5, 0.5, 0.5);
+                if (v_type == 3.0 && abs(v_pos.x) > 0.6) discard; // Tower is tall and thin
+                if (v_pos.y > 0.6 && fract((v_pos.x + 1.0) * 4.0) > 0.5) discard; // Crenellations
+                if (v_type == 3.0 && v_pos.y > 0.4 && v_pos.y < 0.6) color = groupColor; // Tower band
+            } else {
+                color = vec3(0.3);
+            }
+        }
+
+        outColor = vec4(color, alpha);
+    } `;
 
   const VEH_VS = `#version 300 es
     layout(location = 0) in vec2 a_pos;
@@ -634,9 +683,6 @@ window.addEventListener("DOMContentLoaded", () => {
   let isLooping = true,
     targetTPS = 60,
     showPoliticalMap = true;
-  let cameraX = 0,
-    cameraY = 0,
-    zoom = 1.0;
   let inspectEntityId = -1,
     followEntityId = -1,
     tickCount = 0;
@@ -987,6 +1033,8 @@ window.addEventListener("DOMContentLoaded", () => {
     // Warehouses, houses, towers, walls, fields - drawn before entities
     // ============================================================
     if (bldPositionX) {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.useProgram(bldProg);
       gl.uniform2fv(locs.bld.res, uRes);
       gl.uniform4fv(locs.bld.cam, uCam);
@@ -1017,6 +1065,7 @@ window.addEventListener("DOMContentLoaded", () => {
       gl.vertexAttribPointer(5, 1, gl.INT, false, 0, 0);
       gl.vertexAttribDivisor(5, 1);
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, MAX_BUILDINGS);
+      gl.disable(gl.BLEND);
     }
 
     // ============================================================

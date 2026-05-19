@@ -55,15 +55,17 @@ export function runLifecycleSystem(
 
     if (S.state[i] === C.EntityState.Dead) continue;
 
+    const baseIdx = i * C.MAX_GROUP_CHANNELS;
+    const gid = S.groupAffiliations[baseIdx]; // Primary group
+
     // 0. Demographics & Stats (Summary logic)
     if (S.tickCount % 60 === 0) {
-      const baseIdx = i * C.MAX_GROUP_CHANNELS;
       let primaryGid = -1;
       for (let s = 0; s < C.PUBLIC_GROUP_SLOTS; s++) {
-        const gid = S.groupAffiliations[baseIdx + s];
-        if (gid >= 0 && gid < C.MAX_GROUPS) {
-          Atomics.add(S.groupPopulationCount, gid, 1);
-          if (primaryGid === -1) primaryGid = gid;
+        const slotGid = S.groupAffiliations[baseIdx + s];
+        if (slotGid >= 0 && slotGid < C.MAX_GROUPS) {
+          Atomics.add(S.groupPopulationCount, slotGid, 1);
+          if (primaryGid === -1) primaryGid = slotGid;
         }
       }
       if (primaryGid !== -1) {
@@ -72,32 +74,16 @@ export function runLifecycleSystem(
       }
     }
 
-    // 1. Survival Logic (Decay & Attrition)
-    let decayRate = 1;
-    if (S.money[i] > 0) decayRate = 0;
-    if (
-      S.state[i] === C.EntityState.Harvesting ||
-      S.state[i] === C.EntityState.ReturningToDepot
-    )
-      decayRate = 0;
-    if (S.tickCount % (240 + (i % 60)) === 0) S.health[i] -= decayRate;
+    // 1. Individual Aging (HARD LIMIT)
+    // Only applies to characters (those with a group affiliation or carrying capacity)
+    if (gid !== -1 || S.entityInventory[i] > 0 || S.charTool[i] !== -1) {
+      const ageTicks = S.tickCount - S.charBirthTick[i];
+      const maxAgeTicks = S.effectiveLifespan[i] * C.TICKS_PER_YEAR;
 
-    // Starvation damage
-    if (S.tickCount % 60 === 0) {
-      const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS + 0];
-      if (gid >= 0 && gid < C.MAX_GROUPS && S.starvingGroups[gid] === 1) {
-        S.health[i] -= 2; // Reduced from 10 to make it less harsh
+      if (ageTicks >= maxAgeTicks) {
+        S.health[i] = 0; // Hard limit reached
       }
     }
-
-    // 1.5 Natural Aging (RAPID SCALE)
-    if (S.tickCount % C.TICKS_PER_YEAR === 0) {
-      const age = Math.floor(S.tickCount / C.TICKS_PER_YEAR);
-      if (age > 60) {
-        S.health[i] -= Math.max(0, Math.floor((age - 60) / 2));
-      }
-    }
-
     // Mana Regeneration
     if ((traits & C.TRAIT_MAGIC) !== 0 && S.tickCount % 60 === 0) {
       S.mana[i] = Math.min(100, S.mana[i] + 5);
@@ -107,6 +93,7 @@ export function runLifecycleSystem(
 
     // 2. Autonomy State Machine (Decision Making)
     if (
+      S.state[i] === C.EntityState.Idle &&
       S.targetEntityId[i] !== -3 &&
       S.state[i] !== C.EntityState.Combat &&
       S.state[i] !== C.EntityState.Trading &&
@@ -170,10 +157,7 @@ export function runLifecycleSystem(
           S.state[i] = C.EntityState.Fleeing;
           S.targetEntityId[i] = enemyId;
           S.actionTimer[i] = 120;
-        } else if (
-          S.state[i] === C.EntityState.Idle &&
-          S.tickCount % (60 + (i % 30)) === 0
-        ) {
+        } else if (S.tickCount % (60 + (i % 30)) === 0) {
           // Looting discovery
           const tx = Math.floor(S.positionX[i] / C.GRID_SIZE);
           const ty = Math.floor(S.positionY[i] / C.GRID_SIZE);
@@ -200,13 +184,13 @@ export function runLifecycleSystem(
       }
     }
 
-    // 3. Death Handling
+    // 3. Death condition
     if (S.health[i] <= 0) {
       const deadX = S.positionX[i];
       const deadY = S.positionY[i];
       const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS + 0];
 
-      // Drop loot on death
+      // Drop loot on death (Preserving existing advanced item dropping)
       if (S.money[i] > 0) {
         const moneyPerItem = 100;
         const count = Math.min(10, Math.floor(S.money[i] / moneyPerItem));
@@ -234,11 +218,20 @@ export function runLifecycleSystem(
       }
 
       S.state[i] = C.EntityState.Dead;
-      S.positionX[i] = -10000;
-      S.positionY[i] = -10000;
       S.health[i] = 0;
+      S.velocityX[i] = 0;
+      S.velocityY[i] = 0;
       S.isMounted[i] = 0;
       S.targetVehicleId[i] = -1;
+      S.entityInventory[i] = 0;
+
+      // Clear group affiliation so they are ignored by loops and spatial queries
+      S.groupAffiliations[i * C.MAX_GROUP_CHANNELS] = -1;
+
+      // Push off-screen to allow GPU-side culling to hide the sprite immediately
+      S.positionX[i] = -1000;
+      S.positionY[i] = -1000;
+
       if (gid !== -1) Atomics.sub(S.groupPopulationCount, gid, 1);
     }
   }

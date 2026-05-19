@@ -97,6 +97,54 @@ export function findNearestWithTrait(
   return closestId;
 }
 
+export function findNearestEnemy(
+  x: number,
+  y: number,
+  radius: number,
+  myGroupId: number,
+): number {
+  const radiusSq = radius * radius;
+  const minCellX = Math.max(0, Math.floor((x - radius) / C.GRID_SIZE));
+  const maxCellX = Math.min(
+    C.GRID_COLS - 1,
+    Math.floor((x + radius) / C.GRID_SIZE),
+  );
+  const minCellY = Math.max(0, Math.floor((y - radius) / C.GRID_SIZE));
+  const maxCellY = Math.min(
+    C.GRID_ROWS - 1,
+    Math.floor((y + radius) / C.GRID_SIZE),
+  );
+
+  let closestId = -1;
+  let minDist = radiusSq;
+
+  for (let cy = minCellY; cy <= maxCellY; cy++) {
+    for (let cx = minCellX; cx <= maxCellX; cx++) {
+      const cellIndex = cy * C.GRID_COLS + cx;
+      let id = S.spatialHead[cellIndex];
+
+      while (id !== -1) {
+        // Ignore dead entities
+        if (S.state[id] !== C.EntityState.Dead) {
+          const theirGroup = S.groupAffiliations[id * C.MAX_GROUP_CHANNELS];
+          // Only target characters with a different, valid group ID
+          if (theirGroup !== -1 && theirGroup !== myGroupId) {
+            const dx = S.positionX[id] - x;
+            const dy = S.positionY[id] - y;
+            const dist = dx * dx + dy * dy;
+            if (dist < minDist) {
+              minDist = dist;
+              closestId = id;
+            }
+          }
+        }
+        id = S.spatialNext[id];
+      }
+    }
+  }
+  return closestId;
+}
+
 export function findNearestBuilding(
   x: number,
   y: number,
@@ -127,8 +175,8 @@ export function findNearestBuilding(
       while (id !== -1) {
         if (
           S.bldHealth[id] > 0 &&
-          S.bldType[id] === type &&
-          S.bldOwnerGroup[id] === groupId
+          (type === -1 || S.bldType[id] === type) &&
+          (groupId === -1 || S.bldOwnerGroup[id] === groupId)
         ) {
           const dx = S.bldPositionX[id] - x;
           const dy = S.bldPositionY[id] - y;
@@ -258,40 +306,34 @@ export function popNextEvent(entityId: number): number {
 export function broadcastGroupCommand(
   groupId: number,
   commandState: number,
-  targetX: number,
-  targetY: number,
+  tx: number,
+  ty: number,
 ): void {
-  if (groupId >= 0 && groupId < C.MAX_GROUPS) {
-    S.groupTargetX[groupId] = targetX;
-    S.groupTargetY[groupId] = targetY;
-    S.groupTargetEntityId[groupId] = -2;
-    S.groupTargetAge[groupId] = 0;
-  }
   for (let i = 0; i < C.MAX_ENTITIES; i++) {
     if (S.state[i] === C.EntityState.Dead) continue;
 
-    const isResource =
-      (S.traitBitmask[i] & (C.TRAIT_TREE | C.TRAIT_GOLD | C.TRAIT_BUSH)) !== 0;
-    if (isResource) continue;
-    let issuingPriority = 0;
-    let slotIdx = -1;
-    const baseIdx = i * C.MAX_GROUP_CHANNELS;
-    for (let s = 0; s < C.MAX_GROUP_CHANNELS; s++) {
-      if (S.groupAffiliations[baseIdx + s] === groupId) {
-        slotIdx = s;
-        issuingPriority = C.MAX_GROUP_CHANNELS - s;
-        break;
-      }
-    }
-    if (issuingPriority > 0) {
+    if (S.groupAffiliations[i * C.MAX_GROUP_CHANNELS] === groupId) {
+      // ACTION: COMBAT (3) -> Force idle units into a high-radius aggro scan
       if (
-        S.activePrioritySlot[i] === -1 ||
-        slotIdx <= S.activePrioritySlot[i]
+        commandState === C.EntityState.Combat &&
+        S.state[i] === C.EntityState.Idle
       ) {
-        S.state[i] = commandState;
-        S.actionTimer[i] = 0;
-        S.activeCommandPriority[i] = issuingPriority;
-        S.activePrioritySlot[i] = slotIdx;
+        const enemyId = findNearestEnemy(
+          S.positionX[i],
+          S.positionY[i],
+          300,
+          groupId,
+        ); // Massive 300 unit radius
+        if (enemyId !== -1) {
+          S.targetEntityId[i] = enemyId;
+          S.state[i] = C.EntityState.Combat;
+        }
+      }
+      // ACTION: FLEE (2) -> Force units to run to specific coordinates
+      else if (commandState === C.EntityState.Fleeing) {
+        S.state[i] = C.EntityState.Fleeing;
+        S.playerTargetX[i] = tx;
+        S.playerTargetY[i] = ty;
       }
     }
   }
@@ -357,24 +399,6 @@ export function createGroup(name: string, _ownerId: number = -1): number {
         S.gameMonth * C.DAYS_PER_MONTH +
         S.gameYear * C.DAYS_PER_MONTH * C.MONTHS_PER_YEAR;
       S.groupNames.set(g, name);
-
-      // Create a virtual warehouse building so SummarySystem doesn't delete the group
-      // Find empty building slot
-      for (let b = 0; b < C.MAX_BUILDINGS; b++) {
-        if (S.bldType[b] === 0) {
-          S.bldType[b] = C.BuildingType.Warehouse;
-          S.bldHealth[b] = 1000;
-          S.bldOwnerGroup[b] = g;
-          S.bldTier[b] = C.BLD_TIER_1;
-          S.bldPositionX[b] = 100 + g * 50; // Spread out
-          S.bldPositionY[b] = 100 + g * 50;
-          S.bldDataA[b] = 5000;
-          S.bldDataB[b] = 5000;
-          S.bldDataC[b] = 0;
-          S.groupBuildingCount[g] = 1;
-          break;
-        }
-      }
 
       console.log(`Group created: ${name} (ID: ${g})`);
 
@@ -582,6 +606,74 @@ export function createItemInstance(
     }
   }
   return -1;
+}
+
+/**
+ * Phase 21: High-level character initialization and spawn
+ * Standardizes character creation across initial setup, reproduction, and manual spawning.
+ */
+export function spawnCharacter(
+  id: number,
+  x: number,
+  y: number,
+  groupId: number,
+): void {
+  S.state[id] = C.EntityState.Idle;
+  S.positionX[id] = x;
+  S.positionY[id] = y;
+  S.velocityX[id] = (Math.random() - 0.5) * 0.5;
+  S.velocityY[id] = (Math.random() - 0.5) * 0.5;
+  S.health[id] = 100;
+  S.money[id] = 0;
+  S.charBirthTick[id] = S.tickCount;
+  S.traitBitmask[id] = C.TRAIT_NONE; // Reset traits for new citizen
+
+  // Lifetime between 60-100 years as requested
+  S.lifespan[id] = 60 + Math.floor(Math.random() * 41);
+
+  // Clear all group affiliations
+  const baseAffIdx = id * C.MAX_GROUP_CHANNELS;
+  for (let s = 0; s < C.MAX_GROUP_CHANNELS; s++) {
+    S.groupAffiliations[baseAffIdx + s] = -1;
+  }
+
+  // Assign primary group if provided
+  if (groupId !== -1) {
+    S.groupAffiliations[baseAffIdx] = groupId;
+  }
+
+  // Clear targets and status flags
+  S.targetEntityId[id] = -1;
+  S.targetBuildingId[id] = -1;
+  S.targetVehicleId[id] = -1;
+  S.targetItemId[id] = -1;
+  S.isMounted[id] = 0;
+  S.entityInventory[id] = 0;
+  S.mana[id] = 100;
+  S.carriedIntelEntityId[id] = -1;
+  S.charWeapon[id] = -1;
+  S.charArmor[id] = -1;
+  S.charTool[id] = -1;
+
+  // Initialize effective stats
+  S.effectiveLifespan[id] = S.lifespan[id];
+  S.effectiveDamage[id] = S.damage[id] || 10;
+  S.effectiveSpeed[id] = S.speed[id] || 1.0;
+
+  // Generate and notify name
+  const name = generateName();
+  S.entityNames.set(id, name);
+
+  try {
+    if (typeof self !== "undefined" && "postMessage" in self) {
+      self.postMessage({
+        type: "ENTITY_NAMED",
+        payload: { entityId: id, name },
+      });
+    }
+  } catch (e) {
+    // Silent fail if postMessage is unavailable or restricted
+  }
 }
 
 /**

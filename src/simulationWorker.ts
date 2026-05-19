@@ -35,8 +35,6 @@ function tick(): void {
     S.groupFood.fill(0);
     S.groupMisc.fill(0);
     S.groupHouseCapacity.fill(0);
-    S.groupWarehouseX.fill(0);
-    S.groupWarehouseY.fill(0);
   }
 
   // Barrier 1: Ensure stats are cleared before parallel systems start adding to them
@@ -196,6 +194,7 @@ self.onmessage = (e: MessageEvent) => {
           projType: S.projType.buffer,
           projOwnerGroup: S.projOwnerGroup.buffer,
           projLifeTime: S.projLifeTime.buffer,
+          charBirthTick: S.charBirthTick.buffer,
         },
       });
     } else {
@@ -316,60 +315,183 @@ self.onmessage = (e: MessageEvent) => {
   if (type === "SPAWN_REQ") {
     const { spawnType, x, y, groupId } = data.payload;
 
-    // TYPE 1: SPAWN CHARACTER
+    // TYPE 1: SPAWN CHARACTER (Auto-Faction)
     if (spawnType === 1) {
       for (let i = 0; i < C.MAX_ENTITIES; i++) {
         if (S.state[i] === C.EntityState.Dead) {
-          S.positionX[i] = x;
-          S.positionY[i] = y;
-          S.health[i] = 100;
-          S.state[i] = C.EntityState.Idle; // Awaken the entity
+          let finalGroupId = groupId;
 
-          // Clear previous targets and metadata
-          S.targetEntityId[i] = -1;
-          S.targetBuildingId[i] = -1;
-          S.entityInventory[i] = 0;
+          // --- ROBUST GROUP DETECTION (3 Layers) ---
+          let foundGroup = -1;
 
-          // Assign to the requested group slot 0
-          S.groupAffiliations[i * C.MAX_GROUP_CHANNELS] = groupId;
-          break; // Stop searching once placed
-        }
-      }
-    }
+          // 1. Check Territory Map (Official Ownership)
+          const tx_tile = Math.floor(x / 10),
+            ty_tile = Math.floor(y / 10);
+          const tIdx = ty_tile * C.WORLD_MAP_COLS + tx_tile;
+          if (tIdx >= 0 && tIdx < S.territoryOwnerMap.length) {
+            const owner = S.territoryOwnerMap[tIdx];
+            if (owner >= 0 && owner < 100) foundGroup = owner;
+          }
 
-    // TYPE 2: SPAWN WAREHOUSE BUILDING
-    if (spawnType === 2) {
-      for (let i = 0; i < C.MAX_BUILDINGS; i++) {
-        if (S.bldType[i] === 0) {
-          // 0 indicates empty slot
-          S.bldType[i] = 1; // 1 = Warehouse
-          S.bldPositionX[i] = x;
-          S.bldPositionY[i] = y;
-          S.bldHealth[i] = 1000;
-          S.bldTier[i] = 1;
-          S.bldOwnerGroup[i] = groupId;
+          // 2. Check Proximity to Group Anchors (Instant feedback)
+          if (foundGroup === -1) {
+            for (let g = 0; g < 100; g++) {
+              if (S.groupWarehouseX[g] !== -1) {
+                const dx = S.groupWarehouseX[g] - x,
+                  dy = S.groupWarehouseY[g] - y;
+                if (dx * dx + dy * dy < 40000) {
+                  // 200 unit radius
+                  foundGroup = g;
+                  break;
+                }
+              }
+            }
+          }
 
-          // Clear internal storage registers
-          S.bldDataA[i] = 0; // Wood
-          S.bldDataB[i] = 0; // Gold
-          S.bldDataC[i] = 0; // Food
+          // 3. Check Nearest Units (Visual Proximity)
+          if (foundGroup === -1) {
+            const nearbyEntId = U.findNearest(x, y, 100, 0xffffffff);
+            if (nearbyEntId !== -1) {
+              const entG =
+                S.groupAffiliations[nearbyEntId * C.MAX_GROUP_CHANNELS];
+              if (entG >= 0 && entG < 100) foundGroup = entG;
+            }
+          }
+
+          // --- FACTION ASSIGNMENT ---
+          if (foundGroup !== -1) {
+            finalGroupId = foundGroup;
+          } else if (finalGroupId === -1) {
+            // NEW CLAN FOUNDING
+            for (let g = 1; g < 100; g++) {
+              if (
+                Atomics.load(S.groupPopulationCount, g) === 0 &&
+                S.groupBuildingCount[g] === 0
+              ) {
+                finalGroupId = g;
+                const groupName = U.generateName() + " Clan";
+                S.groupNames.set(finalGroupId, groupName);
+                S.groupVisualArchetypes[finalGroupId] = Math.floor(
+                  Math.random() * 4,
+                );
+                S.groupWarehouseX[finalGroupId] = x;
+                S.groupWarehouseY[finalGroupId] = y;
+
+                // SPAWN WAREHOUSE BLUEPRINT (1 HP)
+                for (let b = 0; b < C.MAX_BUILDINGS; b++) {
+                  if (S.bldType[b] === 0) {
+                    S.bldType[b] = 1; // Warehouse
+                    S.bldPositionX[b] = x;
+                    S.bldPositionY[b] = y;
+                    S.bldHealth[b] = 1; // Blueprint
+                    S.bldOwnerGroup[b] = finalGroupId;
+                    S.bldTier[b] = 1;
+                    S.bldDataA[b] = 100; // Starter wood
+                    break;
+                  }
+                }
+
+                // Claim center tile immediately
+                if (tIdx >= 0 && tIdx < S.territoryOwnerMap.length)
+                  S.territoryOwnerMap[tIdx] = finalGroupId;
+
+                if (S.quadrantIndex === 0)
+                  self.postMessage({
+                    type: "GROUP_CREATED",
+                    payload: { groupId: finalGroupId, name: groupName },
+                  });
+                break;
+              }
+            }
+          }
+
+          if (finalGroupId !== -1)
+            Atomics.add(S.groupPopulationCount, finalGroupId, 1);
+
+          // FOUNDER vs JOINER coordinate logic
+          let spawnX = x,
+            spawnY = y;
+          if (finalGroupId !== groupId && groupId === -1) {
+            // Founder offset
+            spawnX += 20.0;
+            spawnY += 20.0;
+          }
+
+          U.spawnCharacter(i, spawnX, spawnY, finalGroupId);
           break;
         }
       }
     }
 
-    // TYPE 3: SPAWN WAGON VEHICLE
-    if (spawnType === 3) {
-      for (let i = 0; i < C.MAX_VEHICLES; i++) {
-        if (S.vehType[i] === 0) {
-          S.vehType[i] = 1; // 1 = Wagon
-          S.vehPositionX[i] = x;
-          S.vehPositionY[i] = y;
-          S.vehVelocityX[i] = 0;
-          S.vehVelocityY[i] = 0;
-          S.vehHealth[i] = 500;
-          S.vehPilotId[i] = -1; // Empty vehicle
-          S.vehOwnerGroup[i] = groupId;
+    // TYPE 2: SPAWN WAREHOUSE BUILDING (Auto-Faction)
+    if (spawnType === 2) {
+      for (let i = 0; i < C.MAX_BUILDINGS; i++) {
+        if (S.bldType[i] === 0) {
+          const tileX = Math.max(
+            0,
+            Math.min(C.WORLD_MAP_COLS - 1, Math.floor(x / 10)),
+          );
+          const tileY = Math.max(
+            0,
+            Math.min(C.WORLD_MAP_ROWS - 1, Math.floor(y / 10)),
+          );
+          const ownerG = S.territoryOwnerMap[tileY * C.WORLD_MAP_COLS + tileX];
+          let finalG = ownerG >= 0 && ownerG < 100 ? ownerG : groupId;
+          if (finalG === -1) {
+            for (let g = 1; g < 100; g++) {
+              if (
+                Atomics.load(S.groupPopulationCount, g) === 0 &&
+                S.groupBuildingCount[g] === 0
+              ) {
+                finalG = g;
+                const groupName = U.generateName() + " Territory";
+                S.groupNames.set(finalG, groupName);
+                if (S.quadrantIndex === 0)
+                  self.postMessage({
+                    type: "GROUP_CREATED",
+                    payload: { groupId: finalG, name: groupName },
+                  });
+                break;
+              }
+            }
+          }
+          S.bldType[i] = 1;
+          S.bldPositionX[i] = x;
+          S.bldPositionY[i] = y;
+          S.bldHealth[i] = 1000;
+          S.bldTier[i] = 1;
+          S.bldOwnerGroup[i] = finalG;
+          S.bldDataA[i] = 200;
+          S.bldDataC[i] = 100;
+          break;
+        }
+      }
+    }
+
+    // TYPE 4,5,6: SPAWN RESOURCES (Tree, Bush, Gold)
+    if (spawnType === 4 || spawnType === 5 || spawnType === 6) {
+      for (let i = 0; i < C.MAX_ENTITIES; i++) {
+        if (S.state[i] === C.EntityState.Dead) {
+          S.positionX[i] = x;
+          S.positionY[i] = y;
+          S.velocityX[i] = 0;
+          S.velocityY[i] = 0;
+          S.health[i] = 100;
+          S.state[i] = C.EntityState.Idle;
+          S.traitBitmask[i] =
+            spawnType === 4
+              ? C.TRAIT_TREE
+              : spawnType === 5
+                ? C.TRAIT_BUSH
+                : C.TRAIT_GOLD;
+          const baseAffIdx = i * C.MAX_GROUP_CHANNELS;
+          for (let s = 0; s < C.MAX_GROUP_CHANNELS; s++)
+            S.groupAffiliations[baseAffIdx + s] = -1;
+          S.entityInventory[i] = 0;
+          S.charTool[i] = -1;
+          S.charWeapon[i] = -1;
+          S.charArmor[i] = -1;
+          if (S.entityNames.has(i)) S.entityNames.delete(i);
           break;
         }
       }
@@ -378,7 +500,6 @@ self.onmessage = (e: MessageEvent) => {
 
   if (type === "UPDATE_BUILDING_REG") {
     const { buildingId, register, value } = data.payload;
-
     if (buildingId >= 0 && buildingId < C.MAX_BUILDINGS) {
       if (register === "A") S.bldDataA[buildingId] = value;
       if (register === "B") S.bldDataB[buildingId] = value;

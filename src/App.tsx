@@ -118,9 +118,9 @@ export const App: React.FC<AppProps> = ({
   const [searchTerm, setSearchTerm] = useState("");
   const [filterState, setFilterState] = useState<number | -1>(-1);
   const [brushActive, setBrushActive] = useState(false);
-  const [brushGroupId, setBrushGroupId] = useState(0);
+  const [brushGroupId, setBrushGroupId] = useState(-1);
   const [brushTrait, setBrushTrait] = useState(0);
-  const [brushSpawnType, setBrushSpawnType] = useState<number>(0); // 0: None, 1: Character, 2: Warehouse, 3: Wagon
+  const [brushSpawnType, setBrushSpawnType] = useState<number>(1); // 1: Citizen default
   const [newGroupName, setNewGroupName] = useState("");
   const [selectedArchetype, setSelectedArchetype] = useState(1);
   const [tpsSpeed, setTpsSpeed] = useState(60);
@@ -378,56 +378,6 @@ export const App: React.FC<AppProps> = ({
             >
               Brush: {brushActive ? "ON" : "OFF"}
             </BrutalButton>
-
-            {brushActive && (
-              <div className="flex items-center gap-3">
-                <div className="flex flex-col">
-                  <label className="text-[8px] uppercase font-bold leading-none mb-1">
-                    Group
-                  </label>
-                  <input
-                    type="number"
-                    value={brushGroupId}
-                    onChange={(e) => setBrushGroupId(parseInt(e.target.value))}
-                    className="w-12 h-6 border border-on-surface bg-surface text-[10px] px-1 focus:outline-none"
-                  />
-                </div>
-
-                <div className="flex flex-col">
-                  <label className="text-[8px] uppercase font-bold leading-none mb-1">
-                    Spawn
-                  </label>
-                  <select
-                    value={brushSpawnType}
-                    onChange={(e) =>
-                      setBrushSpawnType(parseInt(e.target.value))
-                    }
-                    className="h-6 border border-on-surface bg-surface text-[10px] px-1 focus:outline-none"
-                  >
-                    <option value={0}>NONE</option>
-                    <option value={1}>CHAR</option>
-                    <option value={2}>WARE</option>
-                    <option value={3}>WAGON</option>
-                  </select>
-                </div>
-
-                <div className="flex flex-col">
-                  <label className="text-[8px] uppercase font-bold leading-none mb-1">
-                    Trait
-                  </label>
-                  <select
-                    value={brushTrait}
-                    onChange={(e) => setBrushTrait(parseInt(e.target.value))}
-                    className="h-6 border border-on-surface bg-surface text-[10px] px-1 focus:outline-none"
-                  >
-                    <option value={0}>NONE</option>
-                    <option value={1}>TREE</option>
-                    <option value={2}>AGGRO</option>
-                    <option value={4}>SCOUT</option>
-                  </select>
-                </div>
-              </div>
-            )}
           </div>
         </div>
         <div className="flex items-center gap-4">
@@ -485,6 +435,53 @@ export const App: React.FC<AppProps> = ({
           </BrutalButton>
         </div>
       </header>
+
+      {/* Secondary Brush Menu */}
+      {brushActive && (
+        <div className="bg-surface-container w-full h-12 border-b-4 border-on-surface shadow-brutal-sm flex items-center px-margin-lg gap-4 z-40 pointer-events-auto">
+          <span className="font-mono text-[10px] font-black uppercase text-on-surface-variant">
+            Placement Tool:
+          </span>
+          <div className="flex items-center gap-2">
+            <BrutalButton
+              onClick={() => setBrushSpawnType(1)}
+              active={brushSpawnType === 1}
+              className="h-8 px-4 text-[11px]"
+            >
+              Citizen
+            </BrutalButton>
+            <BrutalButton
+              onClick={() => setBrushSpawnType(2)}
+              active={brushSpawnType === 2}
+              className="h-8 px-4 text-[11px]"
+            >
+              Warehouse
+            </BrutalButton>
+            <div className="w-px h-6 bg-on-surface/20 mx-2" />
+            <BrutalButton
+              onClick={() => setBrushSpawnType(4)}
+              active={brushSpawnType === 4}
+              className="h-8 px-4 text-[11px]"
+            >
+              Tree
+            </BrutalButton>
+            <BrutalButton
+              onClick={() => setBrushSpawnType(5)}
+              active={brushSpawnType === 5}
+              className="h-8 px-4 text-[11px]"
+            >
+              Bush
+            </BrutalButton>
+            <BrutalButton
+              onClick={() => setBrushSpawnType(6)}
+              active={brushSpawnType === 6}
+              className="h-8 px-4 text-[11px]"
+            >
+              Gold
+            </BrutalButton>
+          </div>
+        </div>
+      )}
 
       {/* Main Workspace Area */}
       <main className="flex-1 relative flex items-center justify-center p-8 overflow-hidden">

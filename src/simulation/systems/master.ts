@@ -7,6 +7,13 @@ import * as B from "../buffs";
 export function SummarySystem(): void {
   if (S.tickCount % 60 !== 0) return;
 
+  // Aggregate values needed for VM conditional nodes
+  for (let g = 0; g < C.MAX_GROUPS; g++) {
+    // Wealth is the sum of raw materials and processed goods
+    S.groupTotalWealth[g] =
+      S.groupWood[g] + S.groupGold[g] + S.groupFood[g] * 2 + S.groupMisc[g] * 5;
+  }
+
   let totalActive = 0;
   for (let g = 0; g < C.MAX_GROUPS; g++) {
     totalActive += S.groupPopulationCount[g];
@@ -111,20 +118,16 @@ export function SummarySystem(): void {
     const pop = S.groupPopulationCount[g];
     const wealth = S.groupTotalWealth[g];
 
-    const needsSafetySpawn = g < 4 && pop < 20;
     const houseCapacity = Math.max(20, S.groupHouseCapacity[g]);
     const canAffordReproduction =
       pop > 0 && pop < houseCapacity && wealth > 1000;
 
-    if (needsSafetySpawn || canAffordReproduction) {
+    if (canAffordReproduction) {
       let births = 0;
-      const maxBirths = needsSafetySpawn ? 5 : 2;
+      const maxBirths = 2;
       const costPerBirth = 500;
 
-      while (
-        births < maxBirths &&
-        (needsSafetySpawn || S.groupTotalWealth[g] > costPerBirth)
-      ) {
+      while (births < maxBirths && S.groupTotalWealth[g] > costPerBirth) {
         while (
           deadPtr < C.MAX_ENTITIES &&
           S.state[deadPtr] !== C.EntityState.Dead
@@ -133,30 +136,11 @@ export function SummarySystem(): void {
         if (deadPtr >= C.MAX_ENTITIES) break;
 
         const i = deadPtr;
-        S.state[i] = C.EntityState.Idle;
-        S.health[i] = 100;
-        S.positionX[i] = S.groupWarehouseX[g] + (Math.random() - 0.5) * 50;
-        S.positionY[i] = S.groupWarehouseY[g] + (Math.random() - 0.5) * 50;
-        S.velocityX[i] = Math.random() - 0.5;
-        S.velocityY[i] = Math.random() - 0.5;
-        S.groupAffiliations[i * C.MAX_GROUP_CHANNELS + 0] = g;
-        for (let s = 1; s < C.MAX_GROUP_CHANNELS; s++) {
-          S.groupAffiliations[i * C.MAX_GROUP_CHANNELS + s] = -1;
-        }
-        S.targetEntityId[i] = -1;
-        S.entityInventory[i] = 0;
-        S.actionTimer[i] = 60;
+        const px = S.groupWarehouseX[g] + (Math.random() - 0.5) * 50;
+        const py = S.groupWarehouseY[g] + (Math.random() - 0.5) * 50;
+        U.spawnCharacter(i, px, py, g);
 
-        const name = U.generateName();
-        S.entityNames.set(i, name);
-        if (S.quadrantIndex === 0) {
-          self.postMessage({
-            type: "ENTITY_NAMED",
-            payload: { entityId: i, name },
-          });
-        }
-
-        if (!needsSafetySpawn) S.groupTotalWealth[g] -= costPerBirth;
+        S.groupTotalWealth[g] -= costPerBirth;
         births++;
         deadPtr++;
       }
@@ -378,65 +362,54 @@ export function evaluateCompoundRule(ruleIdx: number): boolean {
 }
 
 export function RuleEvaluationSystem(): void {
-  for (let gA = 0; gA < 50; gA++) {
-    if (S.groupPopulationCount[gA] === 0) continue;
-    for (let gB = 0; gB < 50; gB++) {
-      if (gA === gB || S.groupPopulationCount[gB] === 0) continue;
-      const relation = S.groupRelationsMatrix[gA * C.MAX_GROUPS + gB];
-      if (relation <= -50) {
-        U.broadcastGroupCommand(
-          gA,
-          C.EntityState.Combat,
-          S.groupWarehouseX[gB],
-          S.groupWarehouseY[gB],
-        );
-      }
-    }
-  }
+  // Process up to 20 rules defined in the UI
+  for (let i = 0; i < 20; i++) {
+    const rBase = i * 8;
+    // Check if rule is enabled (index 7)
+    if (S.ruleRegistry[rBase + 7] !== 1) continue;
 
-  let firstActiveLocationTargetX = -1;
-  let firstActiveLocationTargetY = -1;
-  for (let r = 0; r < C.MAX_RULES; r++) {
-    const baseIdx = r * 8;
-    if (S.ruleRegistry[baseIdx + 7] === 0) continue;
-    const subjectId = S.ruleRegistry[baseIdx + 1];
-    const conditionType = S.ruleRegistry[baseIdx + 2];
-    const threshold = S.ruleRegistry[baseIdx + 3];
-    const actionState = S.ruleRegistry[baseIdx + 4];
-    const targetX = S.ruleRegistry[baseIdx + 5];
-    const targetY = S.ruleRegistry[baseIdx + 6];
+    const subjectId = S.ruleRegistry[rBase + 1];
+    if (subjectId < 0 || subjectId >= C.MAX_GROUPS) continue;
 
-    let conditionMet = false;
-    if (conditionType === 255) {
-      conditionMet = evaluateCompoundRule(r);
-    } else {
-      if (conditionType === 0) {
-        if (S.groupPopulationCount[subjectId] > threshold) conditionMet = true;
-      } else if (conditionType === 1) {
-        if (S.groupTotalWealth[subjectId] > threshold) conditionMet = true;
-      } else if (conditionType === 3) {
-        if (S.groupTotalWealth[subjectId] < threshold) conditionMet = true;
-      }
-    }
+    const lBase = i * 32;
+    let isTrue = true; // Nodes evaluate as an AND gate stack
 
-    if (conditionMet) {
-      if (actionState === 99) self.postMessage({ type: "SAVE_REQUEST" });
-      else if (
-        actionState === C.ACTION_SPAWN_DEFENSE_PROJECTILE ||
-        actionState === C.ACTION_DECLARE_WAR
-      ) {
-        ExecuteRuleAction(subjectId, actionState);
+    for (let j = 0; j < 32; j++) {
+      const op = S.logicBytecode[lBase + j];
+      if (op === 255) break; // 255 marks the end of active nodes
+
+      let nodeResult = false;
+
+      if (op === 0) {
+        // OP 0: POPULATION > value
+        const val = S.logicBytecode[lBase + ++j];
+        nodeResult = S.groupPopulationCount[subjectId] > val;
+      } else if (op === 1) {
+        // OP 1: WEALTH < value
+        const val = S.logicBytecode[lBase + ++j];
+        nodeResult = S.groupTotalWealth[subjectId] < val;
       } else {
-        U.broadcastGroupCommand(subjectId, actionState, targetX, targetY);
-        if (firstActiveLocationTargetX === -1) {
-          firstActiveLocationTargetX = targetX;
-          firstActiveLocationTargetY = targetY;
-        }
+        // Fast-forward unsupported opcodes to prevent desync
+        if (op === 2) j += 2;
+        if (op === 3) j += 3;
+        continue;
+      }
+
+      if (!nodeResult) {
+        isTrue = false;
+        break; // Short-circuit evaluation
       }
     }
+
+    // If all nodes resolve to true, trigger the compound action
+    if (isTrue) {
+      const actionState = S.ruleRegistry[rBase + 4]; // e.g., 3 = Combat
+      const tx = S.ruleRegistry[rBase + 5];
+      const ty = S.ruleRegistry[rBase + 6];
+
+      U.broadcastGroupCommand(subjectId, actionState, tx, ty);
+    }
   }
-  if (firstActiveLocationTargetX !== -1)
-    updateFlowField(firstActiveLocationTargetX, firstActiveLocationTargetY);
 }
 
 export function GroupKnowledgeDecaySystem(): void {
@@ -619,6 +592,12 @@ export function InfluenceSystem(): void {
 
     if (radius === 0) continue;
 
+    // --- NATIONAL POWER CALCULATION ---
+    // Stronger nations push their borders further
+    const pop = S.groupPopulationCount[gid];
+    const wealth = S.groupTotalWealth[gid];
+    const powerMultiplier = 1.0 + pop / 100.0 + wealth / 20000.0;
+
     // Project circular influence with distance falloff
     const bldTileX = Math.floor(S.bldPositionX[b] / C.TILE_SIZE);
     const bldTileY = Math.floor(S.bldPositionY[b] / C.TILE_SIZE);
@@ -644,16 +623,14 @@ export function InfluenceSystem(): void {
         const idx = tileY * C.WORLD_MAP_COLS + tileX;
         const dist = Math.sqrt(distSq);
 
-        // Calculate influence strength with linear falloff (1.0 at center, 0.0 at edge)
+        // Calculate influence strength with linear falloff and power multiplier
         const falloff = 1.0 - dist / radiusTiles;
-        const influenceStrength = Math.floor(falloff * 1000);
+        const influenceStrength = Math.floor(falloff * 1000 * powerMultiplier);
 
-        // Add influence for this group (allow multiple groups to influence same tile)
-        // This creates the border overlap/tension mechanic
-        S.influenceMap[idx] = Math.max(S.influenceMap[idx], influenceStrength);
-
-        // Only claim territory if unclaimed
-        if (S.territoryOwnerMap[idx] === -1) {
+        // --- STRENGTH-BASED CLAIMING (PUSHING) ---
+        // If our projection here is stronger than the current owner's, we take it.
+        if (influenceStrength > S.influenceMap[idx]) {
+          S.influenceMap[idx] = influenceStrength;
           S.territoryOwnerMap[idx] = gid;
         }
       }
@@ -832,11 +809,7 @@ export function StructureEvolutionSystem() {
       if (whX !== 0 || whY !== 0) {
         for (let i = 0; i < C.MAX_ENTITIES; i++) {
           if (S.state[i] === C.EntityState.Dead) {
-            S.positionX[i] = whX + 10;
-            S.positionY[i] = whY + 10;
-            S.health[i] = 100;
-            S.state[i] = C.EntityState.Idle;
-            S.groupAffiliations[i * C.MAX_GROUP_CHANNELS] = g;
+            U.spawnCharacter(i, whX + 10, whY + 10, g);
 
             // Deduct resources from warehouses
             let foodDeducted = 0;

@@ -23,14 +23,14 @@ export const BrutalButton: React.FC<{
   };
 
   // Active state uses Yellow background (primary-container) for maximum visibility
-  const activeClasses = active
-    ? "bg-primary-container text-on-primary-container shadow-none translate-x-[2px] translate-y-[2px] border-4"
-    : "";
+  // It completely replaces the variant classes to avoid background conflicts
+  const activeClasses =
+    "bg-primary-container text-on-primary-container shadow-none translate-x-[1px] translate-y-[1px] border-3";
 
   return (
     <button
       onClick={onClick}
-      className={`${baseClasses} ${variants[variant]} ${activeClasses} ${className}`}
+      className={`${baseClasses} ${active ? activeClasses : variants[variant]} ${className}`}
     >
       {children}
     </button>

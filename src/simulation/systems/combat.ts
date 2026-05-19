@@ -1,5 +1,6 @@
 import * as C from "../constants";
 import * as S from "../state";
+import * as U from "../utils";
 
 /**
  * Combat System
@@ -117,6 +118,63 @@ export function runCombatSystem(
             }
           }
         }
+      }
+    }
+  }
+
+  // 3. Entity Combat Execution
+  for (let i = startIndex; i < endIndex; i++) {
+    if (S.state[i] === C.EntityState.Dead) continue;
+
+    const myGroup = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS];
+    if (myGroup === -1) continue;
+
+    // 1. Target Acquisition for Idle units
+    if (S.state[i] === C.EntityState.Idle) {
+      // Scan spatial hash for enemy characters within an aggro radius of 50 units
+      const enemyId = U.findNearestEnemy(
+        S.positionX[i],
+        S.positionY[i],
+        50,
+        myGroup,
+      );
+
+      if (enemyId !== -1) {
+        S.targetEntityId[i] = enemyId;
+        S.state[i] = C.EntityState.Combat;
+      }
+    }
+
+    // 2. Combat Execution
+    if (S.state[i] === C.EntityState.Combat) {
+      const targetId = S.targetEntityId[i];
+
+      // Validate target
+      if (targetId === -1 || S.state[targetId] === C.EntityState.Dead) {
+        S.state[i] = C.EntityState.Idle;
+        S.targetEntityId[i] = -1;
+        continue;
+      }
+
+      const dx = S.positionX[targetId] - S.positionX[i];
+      const dy = S.positionY[targetId] - S.positionY[i];
+      const distSq = dx * dx + dy * dy;
+
+      // Melee attack range check (e.g., 5 units squared = 25)
+      if (distSq <= 25) {
+        // Halt movement
+        S.velocityX[i] = 0;
+        S.velocityY[i] = 0;
+
+        // Apply damage based on a timer to prevent instant kills (1 hit per 60 ticks)
+        if (S.tickCount % 60 === 0) {
+          Atomics.sub(S.health, targetId, S.effectiveDamage[i]);
+        }
+      } else {
+        // Move towards target
+        const dist = Math.sqrt(distSq);
+        S.velocityX[i] = (dx / dist) * S.effectiveSpeed[i];
+        S.velocityY[i] = (dy / dist) * S.effectiveSpeed[i];
       }
     }
   }

@@ -172,46 +172,11 @@ export function initializeWorld(): void {
     S.groupMagicFrequency[g] = 0;
     S.groupTotalWealth[g] = 5000;
     S.groupCreatedAt[g] = 0;
+    S.groupWarehouseX[g] = -1;
+    S.groupWarehouseY[g] = -1;
 
     // Assign visual archetype
     S.groupVisualArchetypes[g] = Math.floor(Math.random() * 4);
-
-    // Distribute warehouses
-    const angle = (g / 20) * Math.PI * 2;
-    const dist = 400 + (g % 5) * 50;
-    S.groupWarehouseX[g] = C.WORLD_WIDTH / 2 + Math.cos(angle) * dist;
-    S.groupWarehouseY[g] = C.WORLD_HEIGHT / 2 + Math.sin(angle) * dist;
-  }
-
-  // Define 4 Primary Nations
-  // 0: Yellow Star (Top-Left)
-  S.groupWarehouseX[0] = 300;
-  S.groupWarehouseY[0] = 300;
-  S.groupVisualArchetypes[0] = 3;
-  // 1: Red Circle (Top-Right)
-  S.groupWarehouseX[1] = C.WORLD_WIDTH - 300;
-  S.groupWarehouseY[1] = 300;
-  S.groupVisualArchetypes[1] = 1;
-  // 2: Blue Triangle (Bottom-Left)
-  S.groupWarehouseX[2] = 300;
-  S.groupWarehouseY[2] = C.WORLD_HEIGHT - 300;
-  S.groupVisualArchetypes[2] = 0;
-  // 3: Pink Square (Bottom-Right)
-  S.groupWarehouseX[3] = C.WORLD_WIDTH - 300;
-  S.groupWarehouseY[3] = C.WORLD_HEIGHT - 300;
-  S.groupVisualArchetypes[3] = 2;
-
-  // Spawn initial warehouses as buildings
-  for (let g = 0; g < 4; g++) {
-    S.bldPositionX[g] = S.groupWarehouseX[g];
-    S.bldPositionY[g] = S.groupWarehouseY[g];
-    S.bldType[g] = C.BuildingType.Warehouse;
-    S.bldHealth[g] = 1000;
-    S.bldOwnerGroup[g] = g;
-    S.bldTier[g] = C.BLD_TIER_1;
-    S.bldDataA[g] = 500; // Wood
-    S.bldDataB[g] = 500; // Gold
-    S.bldDataC[g] = 1000; // Food
   }
 
   generateBiomes();
@@ -221,73 +186,14 @@ export function initializeWorld(): void {
     S.state[i] = C.EntityState.Dead;
     S.positionX[i] = -2000;
     S.positionY[i] = -2000;
-    S.velocityX[i] = 0;
-    S.velocityY[i] = 0;
-    S.health[i] = 0;
-    S.money[i] = 0;
-    S.traitBitmask[i] = C.TRAIT_NONE;
-    const baseAffIdx = i * C.GROUP_SLOTS_PER_CHARACTER;
-    for (let s = 0; s < C.GROUP_SLOTS_PER_CHARACTER; s++)
+    // ... rest of reset if needed, but spawnCharacter will overwrite most
+    // Actually, we should still clear them to be safe
+    const baseAffIdx = i * C.MAX_GROUP_CHANNELS;
+    for (let s = 0; s < C.MAX_GROUP_CHANNELS; s++)
       S.groupAffiliations[baseAffIdx + s] = -1;
-    const baseEventIdx = i * C.EVENT_SLOTS_PER_CHARACTER;
-    for (let s = 0; s < C.EVENT_SLOTS_PER_CHARACTER; s++)
-      S.pendingEvents[baseEventIdx + s] = -1;
-    S.targetEntityId[i] = -1;
-    S.targetBuildingId[i] = -1;
-    S.targetVehicleId[i] = -1;
-    S.isMounted[i] = 0;
-    S.activeCommandPriority[i] = 0;
-    S.activePrioritySlot[i] = -1;
-    S.entityInventory[i] = 0;
-    S.mana[i] = 100;
-    S.carriedIntelEntityId[i] = -1;
-    S.charWeapon[i] = -1;
-    S.charArmor[i] = -1;
-    S.charTool[i] = -1;
-    // Default stats with variance
-    S.lifespan[i] = 60 + Math.floor(Math.random() * 21); // 60-80 years
-    S.damage[i] = 10 + Math.floor((Math.random() - 0.5) * 4); // 8-12 (±20%)
-    S.speed[i] = 1.0 + (Math.random() - 0.5) * 0.4; // 0.8-1.2 (±20%)
-    // Initialize effective stats = base stats (no buffs yet)
-    S.effectiveLifespan[i] = S.lifespan[i];
-    S.effectiveDamage[i] = S.damage[i];
-    S.effectiveSpeed[i] = S.speed[i];
   }
 
-  // Spawn 20 members for each nation
   let entityPtr = 0;
-  for (let g = 0; g < 4; g++) {
-    for (let m = 0; m < 20; m++) {
-      if (entityPtr >= C.MAX_ENTITIES) break;
-      const i = entityPtr++;
-      S.state[i] = C.EntityState.Idle;
-      S.positionX[i] = S.groupWarehouseX[g] + (Math.random() - 0.5) * 50;
-      S.positionY[i] = S.groupWarehouseY[g] + (Math.random() - 0.5) * 50;
-      S.velocityX[i] = Math.random() - 0.5;
-      S.velocityY[i] = Math.random() - 0.5;
-      S.health[i] = 100;
-      S.actionTimer[i] = 60;
-      S.groupAffiliations[i * C.MAX_GROUP_CHANNELS + 0] = g;
-
-      const name = U.generateName();
-      S.entityNames.set(i, name);
-      if (S.quadrantIndex === 0) {
-        self.postMessage({
-          type: "ENTITY_NAMED",
-          payload: { entityId: i, name },
-        });
-      }
-      // Default stats with variance for spawned characters
-      S.lifespan[i] = 60 + Math.floor(Math.random() * 21); // 60-80 years
-      S.damage[i] = 10 + Math.floor((Math.random() - 0.5) * 4); // 8-12 (±20%)
-      S.speed[i] = 1.0 + (Math.random() - 0.5) * 0.4; // 0.8-1.2 (±20%)
-      // Initialize effective stats = base stats (no buffs yet)
-      S.effectiveLifespan[i] = S.lifespan[i];
-      S.effectiveDamage[i] = S.damage[i];
-      S.effectiveSpeed[i] = S.speed[i];
-    }
-  }
-
   // Spawn Resources (Trees, Gold, Bushes)
   for (let i = 0; i < 5000; i++) {
     if (entityPtr >= C.MAX_ENTITIES) break;
