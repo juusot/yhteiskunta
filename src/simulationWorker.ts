@@ -312,4 +312,67 @@ self.onmessage = (e: MessageEvent) => {
       }
     }
   }
+
+  if (type === "SPAWN_REQ") {
+    const { spawnType, x, y, groupId } = data.payload;
+
+    // TYPE 1: SPAWN CHARACTER
+    if (spawnType === 1) {
+      for (let i = 0; i < C.MAX_ENTITIES; i++) {
+        if (S.state[i] === C.EntityState.Dead) {
+          S.positionX[i] = x;
+          S.positionY[i] = y;
+          S.health[i] = 100;
+          S.state[i] = C.EntityState.Idle; // Awaken the entity
+
+          // Clear previous targets and metadata
+          S.targetEntityId[i] = -1;
+          S.targetBuildingId[i] = -1;
+          S.entityInventory[i] = 0;
+
+          // Assign to the requested group slot 0
+          S.groupAffiliations[i * C.MAX_GROUP_CHANNELS] = groupId;
+          break; // Stop searching once placed
+        }
+      }
+    }
+
+    // TYPE 2: SPAWN WAREHOUSE BUILDING
+    if (spawnType === 2) {
+      for (let i = 0; i < C.MAX_BUILDINGS; i++) {
+        if (S.bldType[i] === 0) {
+          // 0 indicates empty slot
+          S.bldType[i] = 1; // 1 = Warehouse
+          S.bldPositionX[i] = x;
+          S.bldPositionY[i] = y;
+          S.bldHealth[i] = 1000;
+          S.bldTier[i] = 1;
+          S.bldOwnerGroup[i] = groupId;
+
+          // Clear internal storage registers
+          S.bldDataA[i] = 0; // Wood
+          S.bldDataB[i] = 0; // Gold
+          S.bldDataC[i] = 0; // Food
+          break;
+        }
+      }
+    }
+
+    // TYPE 3: SPAWN WAGON VEHICLE
+    if (spawnType === 3) {
+      for (let i = 0; i < C.MAX_VEHICLES; i++) {
+        if (S.vehType[i] === 0) {
+          S.vehType[i] = 1; // 1 = Wagon
+          S.vehPositionX[i] = x;
+          S.vehPositionY[i] = y;
+          S.vehVelocityX[i] = 0;
+          S.vehVelocityY[i] = 0;
+          S.vehHealth[i] = 500;
+          S.vehPilotId[i] = -1; // Empty vehicle
+          S.vehOwnerGroup[i] = groupId;
+          break;
+        }
+      }
+    }
+  }
 };

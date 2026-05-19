@@ -29,10 +29,19 @@ export function generateBiomes(): void {
     for (let d = 0; d < length; d++) {
       // Add some wiggle to the river
       const wiggle = Math.sin(d * 0.2) * 2;
-      const rx = Math.floor(centerX + Math.cos(angle) * d + Math.cos(angle + Math.PI / 2) * wiggle);
-      const ry = Math.floor(centerY + Math.sin(angle) * d + Math.sin(angle + Math.PI / 2) * wiggle);
+      const rx = Math.floor(
+        centerX + Math.cos(angle) * d + Math.cos(angle + Math.PI / 2) * wiggle,
+      );
+      const ry = Math.floor(
+        centerY + Math.sin(angle) * d + Math.sin(angle + Math.PI / 2) * wiggle,
+      );
 
-      if (rx >= 0 && rx < C.WORLD_MAP_COLS && ry >= 0 && ry < C.WORLD_MAP_ROWS) {
+      if (
+        rx >= 0 &&
+        rx < C.WORLD_MAP_COLS &&
+        ry >= 0 &&
+        ry < C.WORLD_MAP_ROWS
+      ) {
         // 3-tile wide river
         for (let wy = -1; wy <= 1; wy++) {
           for (let wx = -1; wx <= 1; wx++) {
@@ -56,8 +65,16 @@ export function generateBiomes(): void {
     const dy = my - centerY;
     if (dx * dx + dy * dy < (oceanRadius + 10) * (oceanRadius + 10)) continue;
 
-    for (let y = Math.max(0, my - mr); y < Math.min(C.WORLD_MAP_ROWS, my + mr); y++) {
-      for (let x = Math.max(0, mx - mr); x < Math.min(C.WORLD_MAP_COLS, mx + mr); x++) {
+    for (
+      let y = Math.max(0, my - mr);
+      y < Math.min(C.WORLD_MAP_ROWS, my + mr);
+      y++
+    ) {
+      for (
+        let x = Math.max(0, mx - mr);
+        x < Math.min(C.WORLD_MAP_COLS, mx + mr);
+        x++
+      ) {
         const ddx = x - mx;
         const ddy = y - my;
         if (ddx * ddx + ddy * ddy < mr * mr) {

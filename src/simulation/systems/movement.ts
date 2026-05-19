@@ -38,7 +38,10 @@ export function runMovementSystem(
     let blocked = false;
     if (tileIdx >= 0 && tileIdx < S.worldMap.length) {
       const terrain = S.worldMap[tileIdx];
-      if (terrain === C.TerrainType.Mountain || terrain === C.TerrainType.Ocean) {
+      if (
+        terrain === C.TerrainType.Mountain ||
+        terrain === C.TerrainType.Ocean
+      ) {
         blocked = true;
       } else if (terrain === C.TerrainType.Forest) {
         moveX *= 0.6;

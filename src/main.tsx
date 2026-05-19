@@ -769,6 +769,20 @@ window.addEventListener("DOMContentLoaded", () => {
     const worldX = cameraX + ((e.clientX - rect.left) * scaleX) / zoom;
     const worldY = cameraY + ((e.clientY - rect.top) * scaleY) / zoom;
 
+    const brush = (window as any).brushState;
+    if (brush && brush.active && brush.spawnType > 0) {
+      workers[0].postMessage({
+        type: "SPAWN_REQ",
+        payload: {
+          spawnType: brush.spawnType,
+          x: worldX,
+          y: worldY,
+          groupId: brush.groupId,
+        },
+      });
+      return;
+    }
+
     if ((window as any).brushState?.active) {
       workers.forEach((w) =>
         w.postMessage({
@@ -1216,14 +1230,12 @@ window.addEventListener("DOMContentLoaded", () => {
 
         uiWorker.postMessage({ type: "INIT", buffers });
 
-        workers
-          .slice(1)
-          .forEach((sw, si) =>
-            sw.postMessage({
-              type: "INIT",
-              payload: { quadrantIndex: si + 1, buffers },
-            }),
-          );
+        workers.slice(1).forEach((sw, si) =>
+          sw.postMessage({
+            type: "INIT",
+            payload: { quadrantIndex: si + 1, buffers },
+          }),
+        );
         requestAnimationFrame(render);
         setInterval(syncReact, 200);
         startTick();

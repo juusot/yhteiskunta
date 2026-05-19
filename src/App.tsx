@@ -120,6 +120,7 @@ export const App: React.FC<AppProps> = ({
   const [brushActive, setBrushActive] = useState(false);
   const [brushGroupId, setBrushGroupId] = useState(0);
   const [brushTrait, setBrushTrait] = useState(0);
+  const [brushSpawnType, setBrushSpawnType] = useState<number>(0); // 0: None, 1: Character, 2: Warehouse, 3: Wagon
   const [newGroupName, setNewGroupName] = useState("");
   const [selectedArchetype, setSelectedArchetype] = useState(1);
   const [tpsSpeed, setTpsSpeed] = useState(60);
@@ -132,8 +133,9 @@ export const App: React.FC<AppProps> = ({
       active: brushActive,
       groupId: brushGroupId,
       trait: brushTrait,
+      spawnType: brushSpawnType,
     };
-  }, [brushActive, brushGroupId, brushTrait]);
+  }, [brushActive, brushGroupId, brushTrait, brushSpawnType]);
 
   useEffect(() => {
     document.body.dataset.uiOpen = isWindowOpen ? "true" : "false";
@@ -353,6 +355,66 @@ export const App: React.FC<AppProps> = ({
           <div className="bg-secondary-container text-on-secondary-container px-4 py-1 border-2 border-on-surface font-headline text-[24px] font-bold shadow-brutal-sm">
             POLMAP
           </div>
+          <div className="flex items-center gap-3 border-l-2 border-on-surface pl-4 ml-2 h-10">
+            <BrutalButton
+              onClick={() => setBrushActive(!brushActive)}
+              active={brushActive}
+              variant={brushActive ? "primary" : "ghost"}
+              className="h-8 px-3 text-[11px] font-bold uppercase"
+            >
+              Brush: {brushActive ? "ON" : "OFF"}
+            </BrutalButton>
+
+            {brushActive && (
+              <div className="flex items-center gap-3">
+                <div className="flex flex-col">
+                  <label className="text-[8px] uppercase font-bold leading-none mb-1">
+                    Group
+                  </label>
+                  <input
+                    type="number"
+                    value={brushGroupId}
+                    onChange={(e) => setBrushGroupId(parseInt(e.target.value))}
+                    className="w-12 h-6 border border-on-surface bg-surface text-[10px] px-1 focus:outline-none"
+                  />
+                </div>
+
+                <div className="flex flex-col">
+                  <label className="text-[8px] uppercase font-bold leading-none mb-1">
+                    Spawn
+                  </label>
+                  <select
+                    value={brushSpawnType}
+                    onChange={(e) =>
+                      setBrushSpawnType(parseInt(e.target.value))
+                    }
+                    className="h-6 border border-on-surface bg-surface text-[10px] px-1 focus:outline-none"
+                  >
+                    <option value={0}>NONE</option>
+                    <option value={1}>CHAR</option>
+                    <option value={2}>WARE</option>
+                    <option value={3}>WAGON</option>
+                  </select>
+                </div>
+
+                <div className="flex flex-col">
+                  <label className="text-[8px] uppercase font-bold leading-none mb-1">
+                    Trait
+                  </label>
+                  <select
+                    value={brushTrait}
+                    onChange={(e) => setBrushTrait(parseInt(e.target.value))}
+                    className="h-6 border border-on-surface bg-surface text-[10px] px-1 focus:outline-none"
+                  >
+                    <option value={0}>NONE</option>
+                    <option value={1}>TREE</option>
+                    <option value={2}>AGGRO</option>
+                    <option value={4}>SCOUT</option>
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-4">
           <div className="flex gap-2">
@@ -465,14 +527,6 @@ export const App: React.FC<AppProps> = ({
                   </span>
                   <span>
                     Avg: <strong>{avgTickTime.toFixed(1)}ms</strong>
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  Brush:{" "}
-                  <span
-                    className={`bg-surface border border-on-surface px-2 text-on-surface font-bold ${brushActive ? "bg-primary-container" : ""}`}
-                  >
-                    {brushActive ? "ON" : "OFF"}
                   </span>
                 </div>
               </>
@@ -882,53 +936,6 @@ export const App: React.FC<AppProps> = ({
           {isWindowOpen ? "close" : "menu"}
         </span>
       </button>
-
-      {/* Tooltip for Brush State */}
-      {brushActive && (
-        <div className="fixed top-20 right-6 bg-surface border-2 border-on-surface p-3 shadow-brutal pointer-events-auto z-40 w-48 font-mono text-[11px] text-on-surface">
-          <div className="font-bold border-b border-on-surface mb-2 pb-1 uppercase">
-            Brush Controls
-          </div>
-          <div className="space-y-2">
-            <div className="flex justify-between items-center">
-              <span>Active</span>
-              <BrutalButton
-                onClick={() => setBrushActive(false)}
-                variant="error"
-                className="px-1 py-0 h-4"
-              >
-                OFF
-              </BrutalButton>
-            </div>
-            <div className="space-y-1">
-              <label className="block text-[9px] text-on-surface-variant uppercase">
-                Target Group
-              </label>
-              <input
-                type="number"
-                value={brushGroupId}
-                onChange={(e) => setBrushGroupId(parseInt(e.target.value))}
-                className="w-full border border-on-surface px-1 py-0.5 bg-surface-container text-on-surface"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="block text-[9px] text-on-surface-variant uppercase">
-                Trait Bitmask
-              </label>
-              <select
-                value={brushTrait}
-                onChange={(e) => setBrushTrait(parseInt(e.target.value))}
-                className="w-full border border-on-surface px-1 py-0.5 bg-surface-container text-on-surface"
-              >
-                <option value={0}>NONE</option>
-                <option value={1}>TREE</option>
-                <option value={2}>AGGRO</option>
-                <option value={4}>SCOUT</option>
-              </select>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
