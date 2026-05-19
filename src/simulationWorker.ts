@@ -294,19 +294,11 @@ self.onmessage = (e: MessageEvent) => {
         const cellIndex = cy * C.GRID_COLS + cx;
         let entityId = S.spatialHead[cellIndex];
         while (entityId !== -1) {
-          if (
-            S.positionX[entityId] < S.minX ||
-            S.positionX[entityId] >= S.maxX ||
-            S.positionY[entityId] < S.minY ||
-            S.positionY[entityId] >= S.maxY
-          ) {
-            entityId = S.spatialNext[entityId];
-            continue;
-          }
           const dx = S.positionX[entityId] - x;
           const dy = S.positionY[entityId] - y;
           if (dx * dx + dy * dy <= radiusSq) {
-            if (groupId !== -1) S.groupAffiliations[entityId * 8] = groupId;
+            if (groupId !== -1)
+              S.groupAffiliations[entityId * C.MAX_GROUP_CHANNELS] = groupId;
             if (newTrait !== 0) {
               S.traitBitmask[entityId] |= newTrait;
               if ((newTrait & C.TRAIT_TREE) !== 0) {

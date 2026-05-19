@@ -22,13 +22,25 @@ export function runMovementSystem(
     let moveX = S.velocityX[i];
     let moveY = S.velocityY[i];
 
-    // Terrain Speed Modifiers
-    const tx = Math.floor(S.positionX[i] / C.TILE_SIZE);
-    const ty = Math.floor(S.positionY[i] / C.TILE_SIZE);
+    const nextX = S.positionX[i] + moveX;
+    const nextY = S.positionY[i] + moveY;
+
+    // Terrain Speed Modifiers & Collision
+    const tx = Math.max(
+      0,
+      Math.min(C.WORLD_MAP_COLS - 1, Math.floor(nextX / C.TILE_SIZE)),
+    );
+    const ty = Math.max(
+      0,
+      Math.min(C.WORLD_MAP_ROWS - 1, Math.floor(nextY / C.TILE_SIZE)),
+    );
     const tileIdx = ty * C.WORLD_MAP_COLS + tx;
+    let blocked = false;
     if (tileIdx >= 0 && tileIdx < S.worldMap.length) {
       const terrain = S.worldMap[tileIdx];
-      if (terrain === C.TerrainType.Forest) {
+      if (terrain === C.TerrainType.Mountain || terrain === C.TerrainType.Ocean) {
+        blocked = true;
+      } else if (terrain === C.TerrainType.Forest) {
         moveX *= 0.6;
         moveY *= 0.6;
       } else if (terrain === C.TerrainType.Water) {
@@ -37,10 +49,15 @@ export function runMovementSystem(
       }
     }
 
-    S.positionX[i] += moveX;
-    S.positionY[i] += moveY;
+    if (!blocked) {
+      S.positionX[i] += moveX;
+      S.positionY[i] += moveY;
+    } else {
+      S.velocityX[i] *= -0.5; // Bounce slightly off mountains
+      S.velocityY[i] *= -0.5;
+    }
 
-    // Bounds checking
+    // Bounds checking (Strict Clamping)
     if (S.positionX[i] < 0) S.positionX[i] = 0;
     if (S.positionX[i] > C.WORLD_WIDTH) S.positionX[i] = C.WORLD_WIDTH;
     if (S.positionY[i] < 0) S.positionY[i] = 0;
@@ -62,11 +79,17 @@ export function runMovementSystem(
     if (tx >= 0 && tx < C.WORLD_MAP_COLS && ty >= 0 && ty < C.WORLD_MAP_ROWS) {
       const terrain = S.worldMap[tileIdx];
       let blocked = false;
-      if (S.vehType[i] === C.VEHICLE_SHIP && terrain !== C.TerrainType.Water)
+      if (
+        S.vehType[i] === C.VEHICLE_SHIP &&
+        terrain !== C.TerrainType.Water &&
+        terrain !== C.TerrainType.Ocean
+      )
         blocked = true;
       if (
         S.vehType[i] === C.VEHICLE_WAGON &&
-        (terrain === C.TerrainType.Water || terrain === C.TerrainType.Mountain)
+        (terrain === C.TerrainType.Water ||
+          terrain === C.TerrainType.Mountain ||
+          terrain === C.TerrainType.Ocean)
       )
         blocked = true;
 

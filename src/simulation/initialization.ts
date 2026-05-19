@@ -6,24 +6,68 @@ import * as U from "./utils";
 export function generateBiomes(): void {
   S.worldMap.fill(C.TerrainType.Grass);
 
-  // Winding River
-  for (let x = 0; x < C.WORLD_MAP_COLS; x++) {
-    const y = Math.floor(60 + Math.sin(x * 0.1) * 20);
-    for (let dy = -2; dy <= 2; dy++) {
-      const ty = Math.min(C.WORLD_MAP_ROWS - 1, Math.max(0, y + dy));
-      S.worldMap[ty * C.WORLD_MAP_COLS + x] = C.TerrainType.Water;
+  const centerX = C.WORLD_MAP_COLS / 2;
+  const centerY = C.WORLD_MAP_ROWS / 2;
+
+  // 1. Central Ocean
+  const oceanRadius = Math.min(C.WORLD_MAP_COLS, C.WORLD_MAP_ROWS) * 0.15;
+  for (let y = 0; y < C.WORLD_MAP_ROWS; y++) {
+    for (let x = 0; x < C.WORLD_MAP_COLS; x++) {
+      const dx = x - centerX;
+      const dy = y - centerY;
+      if (dx * dx + dy * dy < oceanRadius * oceanRadius) {
+        S.worldMap[y * C.WORLD_MAP_COLS + x] = C.TerrainType.Ocean;
+      }
     }
   }
 
-  // Mountains (Top and Bottom edges)
-  for (let x = 0; x < C.WORLD_MAP_COLS; x++) {
-    for (let y = 0; y < 10; y++)
-      S.worldMap[y * C.WORLD_MAP_COLS + x] = C.TerrainType.Mountain;
-    for (let y = C.WORLD_MAP_ROWS - 10; y < C.WORLD_MAP_ROWS; y++)
-      S.worldMap[y * C.WORLD_MAP_COLS + x] = C.TerrainType.Mountain;
+  // 2. Rivers flowing out of the ocean
+  const numRivers = 4;
+  for (let r = 0; r < numRivers; r++) {
+    const angle = (r / numRivers) * Math.PI * 2 + Math.PI / 4;
+    const length = Math.max(C.WORLD_MAP_COLS, C.WORLD_MAP_ROWS);
+    for (let d = 0; d < length; d++) {
+      // Add some wiggle to the river
+      const wiggle = Math.sin(d * 0.2) * 2;
+      const rx = Math.floor(centerX + Math.cos(angle) * d + Math.cos(angle + Math.PI / 2) * wiggle);
+      const ry = Math.floor(centerY + Math.sin(angle) * d + Math.sin(angle + Math.PI / 2) * wiggle);
+
+      if (rx >= 0 && rx < C.WORLD_MAP_COLS && ry >= 0 && ry < C.WORLD_MAP_ROWS) {
+        // 3-tile wide river
+        for (let wy = -1; wy <= 1; wy++) {
+          for (let wx = -1; wx <= 1; wx++) {
+            const tx = Math.min(C.WORLD_MAP_COLS - 1, Math.max(0, rx + wx));
+            const ty = Math.min(C.WORLD_MAP_ROWS - 1, Math.max(0, ry + wy));
+            S.worldMap[ty * C.WORLD_MAP_COLS + tx] = C.TerrainType.Water;
+          }
+        }
+      }
+    }
   }
 
-  // Forest Patches
+  // 3. Scattered Small Mountains
+  for (let i = 0; i < 30; i++) {
+    const mx = Math.floor(Math.random() * C.WORLD_MAP_COLS);
+    const my = Math.floor(Math.random() * C.WORLD_MAP_ROWS);
+    const mr = Math.floor(Math.random() * 3) + 2; // Small radius 2-4
+
+    // Don't place mountains too close to the center ocean
+    const dx = mx - centerX;
+    const dy = my - centerY;
+    if (dx * dx + dy * dy < (oceanRadius + 10) * (oceanRadius + 10)) continue;
+
+    for (let y = Math.max(0, my - mr); y < Math.min(C.WORLD_MAP_ROWS, my + mr); y++) {
+      for (let x = Math.max(0, mx - mr); x < Math.min(C.WORLD_MAP_COLS, mx + mr); x++) {
+        const ddx = x - mx;
+        const ddy = y - my;
+        if (ddx * ddx + ddy * ddy < mr * mr) {
+          S.worldMap[y * C.WORLD_MAP_COLS + x] = C.TerrainType.Mountain;
+        }
+      }
+    }
+  }
+
+  // 4. Forest Patches
   for (let i = 0; i < 40; i++) {
     const fx = Math.floor(Math.random() * C.WORLD_MAP_COLS);
     const fy = Math.floor(Math.random() * C.WORLD_MAP_ROWS);
@@ -124,20 +168,20 @@ export function initializeWorld(): void {
 
   // Define 4 Primary Nations
   // 0: Yellow Star (Top-Left)
-  S.groupWarehouseX[0] = 150;
-  S.groupWarehouseY[0] = 150;
+  S.groupWarehouseX[0] = 300;
+  S.groupWarehouseY[0] = 300;
   S.groupVisualArchetypes[0] = 3;
   // 1: Red Circle (Top-Right)
-  S.groupWarehouseX[1] = 1450;
-  S.groupWarehouseY[1] = 150;
+  S.groupWarehouseX[1] = C.WORLD_WIDTH - 300;
+  S.groupWarehouseY[1] = 300;
   S.groupVisualArchetypes[1] = 1;
   // 2: Blue Triangle (Bottom-Left)
-  S.groupWarehouseX[2] = 150;
-  S.groupWarehouseY[2] = 1050;
+  S.groupWarehouseX[2] = 300;
+  S.groupWarehouseY[2] = C.WORLD_HEIGHT - 300;
   S.groupVisualArchetypes[2] = 0;
   // 3: Pink Square (Bottom-Right)
-  S.groupWarehouseX[3] = 1450;
-  S.groupWarehouseY[3] = 1050;
+  S.groupWarehouseX[3] = C.WORLD_WIDTH - 300;
+  S.groupWarehouseY[3] = C.WORLD_HEIGHT - 300;
   S.groupVisualArchetypes[3] = 2;
 
   // Spawn initial warehouses as buildings
@@ -242,10 +286,10 @@ export function initializeWorld(): void {
     );
     const terrain = S.worldMap[tileIdx];
 
-    if (terrain === C.TerrainType.Mountain) {
+    if (terrain === C.TerrainType.Mountain || terrain === C.TerrainType.Ocean) {
       entityPtr--;
       continue;
-    } // Skip mountains
+    } // Skip mountains and ocean
 
     S.state[id] = C.EntityState.Idle;
     S.positionX[id] = x;

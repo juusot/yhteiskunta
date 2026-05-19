@@ -163,9 +163,9 @@ export let projLifeTime: Int16Array;
 
 export let quadrantIndex: number = -1;
 export let minX = 0,
-  maxX = 1600,
+  maxX = 3200,
   minY = 0,
-  maxY = 1200;
+  maxY = 2400;
 export let tickCount = 0;
 export let isPaused = false;
 
@@ -183,24 +183,24 @@ export function setQuadrantIndex(idx: number) {
   quadrantIndex = idx;
   if (quadrantIndex === 0) {
     minX = 0;
-    maxX = 800;
-    minY = 0;
-    maxY = 600;
-  } else if (quadrantIndex === 1) {
-    minX = 800;
     maxX = 1600;
     minY = 0;
-    maxY = 600;
+    maxY = 1200;
+  } else if (quadrantIndex === 1) {
+    minX = 1600;
+    maxX = 3200;
+    minY = 0;
+    maxY = 1200;
   } else if (quadrantIndex === 2) {
     minX = 0;
-    maxX = 800;
-    minY = 600;
-    maxY = 1200;
-  } else if (quadrantIndex === 3) {
-    minX = 800;
     maxX = 1600;
-    minY = 600;
-    maxY = 1200;
+    minY = 1200;
+    maxY = 2400;
+  } else if (quadrantIndex === 3) {
+    minX = 1600;
+    maxX = 3200;
+    minY = 1200;
+    maxY = 2400;
   }
 }
 

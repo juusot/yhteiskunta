@@ -185,8 +185,8 @@ export function findNearestVehicle(
 }
 
 export function pushEvent(entityId: number, eventId: number): boolean {
-  const baseIndex = entityId * 4;
-  for (let slot = 0; slot < 4; slot++) {
+  const baseIndex = entityId * C.EVENT_SLOTS_PER_CHARACTER;
+  for (let slot = 0; slot < C.EVENT_SLOTS_PER_CHARACTER; slot++) {
     if (S.pendingEvents[baseIndex + slot] === -1) {
       S.pendingEvents[baseIndex + slot] = eventId;
       return true;
@@ -196,12 +196,12 @@ export function pushEvent(entityId: number, eventId: number): boolean {
 }
 
 export function popNextEvent(entityId: number): number {
-  const baseIndex = entityId * 4;
+  const baseIndex = entityId * C.EVENT_SLOTS_PER_CHARACTER;
   const nextEventId = S.pendingEvents[baseIndex];
-  S.pendingEvents[baseIndex] = S.pendingEvents[baseIndex + 1];
-  S.pendingEvents[baseIndex + 1] = S.pendingEvents[baseIndex + 2];
-  S.pendingEvents[baseIndex + 2] = S.pendingEvents[baseIndex + 3];
-  S.pendingEvents[baseIndex + 3] = -1;
+  for (let s = 0; s < C.EVENT_SLOTS_PER_CHARACTER - 1; s++) {
+    S.pendingEvents[baseIndex + s] = S.pendingEvents[baseIndex + s + 1];
+  }
+  S.pendingEvents[baseIndex + C.EVENT_SLOTS_PER_CHARACTER - 1] = -1;
   return nextEventId;
 }
 
@@ -219,24 +219,17 @@ export function broadcastGroupCommand(
   }
   for (let i = 0; i < C.MAX_ENTITIES; i++) {
     if (S.state[i] === C.EntityState.Dead) continue;
-    if (
-      S.positionX[i] < S.minX ||
-      S.positionX[i] >= S.maxX ||
-      S.positionY[i] < S.minY ||
-      S.positionY[i] >= S.maxY
-    )
-      continue;
 
     const isResource =
       (S.traitBitmask[i] & (C.TRAIT_TREE | C.TRAIT_GOLD | C.TRAIT_BUSH)) !== 0;
     if (isResource) continue;
     let issuingPriority = 0;
     let slotIdx = -1;
-    const baseIdx = i * 8;
-    for (let s = 0; s < 8; s++) {
+    const baseIdx = i * C.MAX_GROUP_CHANNELS;
+    for (let s = 0; s < C.MAX_GROUP_CHANNELS; s++) {
       if (S.groupAffiliations[baseIdx + s] === groupId) {
         slotIdx = s;
-        issuingPriority = 8 - s;
+        issuingPriority = C.MAX_GROUP_CHANNELS - s;
         break;
       }
     }
@@ -363,9 +356,9 @@ export function assignCharacterToGroup(
 ): boolean {
   if (entityId < 0 || entityId >= C.MAX_ENTITIES) return false;
   if (groupId < 0 || groupId >= C.MAX_GROUPS) return false;
-  if (slot < 0 || slot >= C.GROUP_SLOTS_PER_CHARACTER) return false;
+  if (slot < 0 || slot >= C.MAX_GROUP_CHANNELS) return false;
 
-  const baseIdx = entityId * C.GROUP_SLOTS_PER_CHARACTER;
+  const baseIdx = entityId * C.MAX_GROUP_CHANNELS;
   S.groupAffiliations[baseIdx + slot] = groupId;
 
   console.log(`Entity ${entityId} assigned to Group ${groupId} (slot ${slot})`);
@@ -382,9 +375,9 @@ export function removeCharacterFromGroup(
   slot: number,
 ): boolean {
   if (entityId < 0 || entityId >= C.MAX_ENTITIES) return false;
-  if (slot < 0 || slot >= C.GROUP_SLOTS_PER_CHARACTER) return false;
+  if (slot < 0 || slot >= C.MAX_GROUP_CHANNELS) return false;
 
-  const baseIdx = entityId * C.GROUP_SLOTS_PER_CHARACTER;
+  const baseIdx = entityId * C.MAX_GROUP_CHANNELS;
   S.groupAffiliations[baseIdx + slot] = -1;
 
   console.log(`Entity ${entityId} removed from group slot ${slot}`);
@@ -401,8 +394,8 @@ export function getGroupMembers(groupId: number): number[] {
   for (let i = 0; i < C.MAX_ENTITIES; i++) {
     if (S.state[i] === C.EntityState.Dead) continue;
 
-    const baseIdx = i * C.GROUP_SLOTS_PER_CHARACTER;
-    for (let slot = 0; slot < C.GROUP_SLOTS_PER_CHARACTER; slot++) {
+    const baseIdx = i * C.MAX_GROUP_CHANNELS;
+    for (let slot = 0; slot < C.MAX_GROUP_CHANNELS; slot++) {
       if (S.groupAffiliations[baseIdx + slot] === groupId) {
         members.push(i);
         break;
@@ -487,8 +480,8 @@ export function sendEventToGroup(groupId: number, eventType: number): number {
   for (let i = 0; i < C.MAX_ENTITIES; i++) {
     if (S.state[i] === C.EntityState.Dead) continue;
 
-    const baseIdx = i * C.GROUP_SLOTS_PER_CHARACTER;
-    for (let slot = 0; slot < C.GROUP_SLOTS_PER_CHARACTER; slot++) {
+    const baseIdx = i * C.MAX_GROUP_CHANNELS;
+    for (let slot = 0; slot < C.MAX_GROUP_CHANNELS; slot++) {
       if (S.groupAffiliations[baseIdx + slot] === groupId) {
         // Add event to first empty slot
         const eventBase = i * C.EVENT_SLOTS_PER_CHARACTER;

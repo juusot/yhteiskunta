@@ -40,7 +40,7 @@ self.onmessage = (e: MessageEvent) => {
           x: S.positionX[i],
           y: S.positionY[i],
           health: S.health[i],
-          faction: S.groupAffiliations[i * 10], // Primary group affiliation
+          faction: S.groupAffiliations[i * C.MAX_GROUP_CHANNELS], // Primary group affiliation
           state: S.state[i],
         });
       }

@@ -25,14 +25,18 @@ export function rebuildSpatialHash(
       continue;
     }
 
-    const tx = Math.floor(S.positionX[i] / C.GRID_SIZE);
-    const ty = Math.floor(S.positionY[i] / C.GRID_SIZE);
+    const tx = Math.max(
+      0,
+      Math.min(C.GRID_COLS - 1, Math.floor(S.positionX[i] / C.GRID_SIZE)),
+    );
+    const ty = Math.max(
+      0,
+      Math.min(C.GRID_ROWS - 1, Math.floor(S.positionY[i] / C.GRID_SIZE)),
+    );
 
-    if (tx >= 0 && tx < C.GRID_COLS && ty >= 0 && ty < C.GRID_ROWS) {
-      const cellIdx = ty * C.GRID_COLS + tx;
-      if (cellIdx >= 0 && cellIdx < S.spatialHead.length) {
-        S.spatialNext[i] = Atomics.exchange(S.spatialHead, cellIdx, i);
-      }
+    const cellIdx = ty * C.GRID_COLS + tx;
+    if (cellIdx >= 0 && cellIdx < S.spatialHead.length) {
+      S.spatialNext[i] = Atomics.exchange(S.spatialHead, cellIdx, i);
     }
   }
 
@@ -42,13 +46,17 @@ export function rebuildSpatialHash(
   for (let i = bldStart; i < bldEnd; i++) {
     if (S.bldHealth[i] <= 0 || S.bldType[i] === 0) continue;
 
-    const tx = Math.floor(S.bldPositionX[i] / C.GRID_SIZE);
-    const ty = Math.floor(S.bldPositionY[i] / C.GRID_SIZE);
-    if (tx >= 0 && tx < C.GRID_COLS && ty >= 0 && ty < C.GRID_ROWS) {
-      const cellIdx = ty * C.GRID_COLS + tx;
-      if (cellIdx >= 0 && cellIdx < S.bldSpatialHead.length) {
-        S.bldSpatialNext[i] = Atomics.exchange(S.bldSpatialHead, cellIdx, i);
-      }
+    const tx = Math.max(
+      0,
+      Math.min(C.GRID_COLS - 1, Math.floor(S.bldPositionX[i] / C.GRID_SIZE)),
+    );
+    const ty = Math.max(
+      0,
+      Math.min(C.GRID_ROWS - 1, Math.floor(S.bldPositionY[i] / C.GRID_SIZE)),
+    );
+    const cellIdx = ty * C.GRID_COLS + tx;
+    if (cellIdx >= 0 && cellIdx < S.bldSpatialHead.length) {
+      S.bldSpatialNext[i] = Atomics.exchange(S.bldSpatialHead, cellIdx, i);
     }
   }
 
@@ -58,13 +66,17 @@ export function rebuildSpatialHash(
   for (let i = vehStart; i < vehEnd; i++) {
     if (S.vehHealth[i] <= 0 || S.vehType[i] === 0) continue;
 
-    const tx = Math.floor(S.vehPositionX[i] / C.GRID_SIZE);
-    const ty = Math.floor(S.vehPositionY[i] / C.GRID_SIZE);
-    if (tx >= 0 && tx < C.GRID_COLS && ty >= 0 && ty < C.GRID_ROWS) {
-      const cellIdx = ty * C.GRID_COLS + tx;
-      if (cellIdx >= 0 && cellIdx < S.vehSpatialHead.length) {
-        S.vehSpatialNext[i] = Atomics.exchange(S.vehSpatialHead, cellIdx, i);
-      }
+    const tx = Math.max(
+      0,
+      Math.min(C.GRID_COLS - 1, Math.floor(S.vehPositionX[i] / C.GRID_SIZE)),
+    );
+    const ty = Math.max(
+      0,
+      Math.min(C.GRID_ROWS - 1, Math.floor(S.vehPositionY[i] / C.GRID_SIZE)),
+    );
+    const cellIdx = ty * C.GRID_COLS + tx;
+    if (cellIdx >= 0 && cellIdx < S.vehSpatialHead.length) {
+      S.vehSpatialNext[i] = Atomics.exchange(S.vehSpatialHead, cellIdx, i);
     }
   }
 
@@ -78,13 +90,17 @@ export function rebuildSpatialHash(
   for (let i = itemStart; i < itemEnd; i++) {
     if (S.itemInstanceOwnerType[i] !== C.OWNER_TYPE_GROUND) continue;
 
-    const tx = Math.floor(S.itemInstanceX[i] / C.GRID_SIZE);
-    const ty = Math.floor(S.itemInstanceY[i] / C.GRID_SIZE);
-    if (tx >= 0 && tx < C.GRID_COLS && ty >= 0 && ty < C.GRID_ROWS) {
-      const cellIdx = ty * C.GRID_COLS + tx;
-      if (cellIdx >= 0 && cellIdx < S.itemSpatialHead.length) {
-        S.itemSpatialNext[i] = Atomics.exchange(S.itemSpatialHead, cellIdx, i);
-      }
+    const tx = Math.max(
+      0,
+      Math.min(C.GRID_COLS - 1, Math.floor(S.itemInstanceX[i] / C.GRID_SIZE)),
+    );
+    const ty = Math.max(
+      0,
+      Math.min(C.GRID_ROWS - 1, Math.floor(S.itemInstanceY[i] / C.GRID_SIZE)),
+    );
+    const cellIdx = ty * C.GRID_COLS + tx;
+    if (cellIdx >= 0 && cellIdx < S.itemSpatialHead.length) {
+      S.itemSpatialNext[i] = Atomics.exchange(S.itemSpatialHead, cellIdx, i);
     }
   }
 }

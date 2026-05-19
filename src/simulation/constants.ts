@@ -8,16 +8,16 @@ export const MAX_VEHICLES = 5_000;
 export const MAX_ITEM_DEFINITIONS = 1000;
 export const MAX_ITEM_INSTANCES = 50000;
 
-export const WORLD_WIDTH = 1600;
-export const WORLD_HEIGHT = 1200;
+export const WORLD_WIDTH = 3200;
+export const WORLD_HEIGHT = 2400;
 export const GRID_SIZE = 50;
 export const GRID_COLS = Math.ceil(WORLD_WIDTH / GRID_SIZE);
 export const GRID_ROWS = Math.ceil(WORLD_HEIGHT / GRID_SIZE);
 export const NUM_CELLS = GRID_COLS * GRID_ROWS;
 
 export const TILE_SIZE = 10;
-export const WORLD_MAP_COLS = 160;
-export const WORLD_MAP_ROWS = 120;
+export const WORLD_MAP_COLS = 320;
+export const WORLD_MAP_ROWS = 240;
 
 export const TRAIT_NONE = 0;
 export const TRAIT_TREE = 1 << 0;
@@ -35,6 +35,7 @@ export enum TerrainType {
   Forest = 1,
   Water = 2,
   Mountain = 3,
+  Ocean = 4,
 }
 
 export const EVENT_HOSTILE_ATTACK = 99;

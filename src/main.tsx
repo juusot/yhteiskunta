@@ -13,6 +13,7 @@ import {
   MAX_VEHICLES,
   MAX_PROJECTILES,
   MAX_ITEM_INSTANCES,
+  MAX_GROUP_CHANNELS,
 } from "./simulation/constants";
 
 console.log("Main script loading...");
@@ -155,7 +156,10 @@ window.addEventListener("DOMContentLoaded", () => {
     uniform vec4 u_camera;
     out float v_type;
     void main() {
-        vec2 worldPos = vec2(float(gl_InstanceID % 160), float(gl_InstanceID / 160)) * 10.0;
+        float idx = float(gl_InstanceID);
+        float cols = float(${MAP_COLS});
+        vec2 gridPos = vec2(mod(idx, cols), floor(idx / cols));
+        vec2 worldPos = gridPos * 10.0;
         vec2 screenPos = (worldPos - u_camera.xy) * u_camera.z;
         vec2 clipPos = (screenPos / u_resolution) * 2.0 - 1.0;
         clipPos.y = -clipPos.y;
@@ -171,8 +175,9 @@ window.addEventListener("DOMContentLoaded", () => {
         if (v_type == 1.0) outColor = vec4(0.8, 0.9, 0.7, 1.0); // Forest
         else if (v_type == 2.0) outColor = vec4(0.5, 0.7, 1.0, 1.0); // Water
         else if (v_type == 3.0) outColor = vec4(0.4, 0.4, 0.4, 1.0); // Mountain
+        else if (v_type == 4.0) outColor = vec4(0.2, 0.3, 0.6, 1.0); // Ocean (Dark Blue)
         else outColor = vec4(1.0, 1.0, 0.9, 1.0); // Grass
-    }`;
+    } `;
 
   const INF_VS = `#version 300 es
     layout(location = 0) in vec2 a_pos;
@@ -188,7 +193,10 @@ window.addEventListener("DOMContentLoaded", () => {
     out float v_zoom;
     out vec2 v_localPos;
     void main() {
-        vec2 worldPos = vec2(float(gl_InstanceID % 160), float(gl_InstanceID / 160)) * 10.0;
+        float idx = float(gl_InstanceID);
+        float cols = float(${MAP_COLS});
+        vec2 gridPos = vec2(mod(idx, cols), floor(idx / cols));
+        vec2 worldPos = gridPos * 10.0;
         vec2 screenPos = (worldPos - u_camera.xy) * u_camera.z;
         vec2 clipPos = (screenPos / u_resolution) * 2.0 - 1.0;
         clipPos.y = -clipPos.y;
@@ -779,7 +787,7 @@ window.addEventListener("DOMContentLoaded", () => {
       let foundIdx = -1;
       let minDist = 20.0;
       if (positionX) {
-        for (let i = 0; i < 100_000; i++) {
+        for (let i = 0; i < MAX_ENTITIES; i++) {
           if (state && state[i] === 5) continue;
           const dx = positionX[i] - worldX;
           const dy = positionY[i] - worldY;
@@ -995,7 +1003,7 @@ window.addEventListener("DOMContentLoaded", () => {
     gl.bindBuffer(gl.ARRAY_BUFFER, instGroupVbo);
     gl.bufferData(gl.ARRAY_BUFFER, groupAffiliations, gl.DYNAMIC_DRAW);
     gl.enableVertexAttribArray(4);
-    gl.vertexAttribPointer(4, 1, gl.INT, false, 8 * 4, 0);
+    gl.vertexAttribPointer(4, 1, gl.INT, false, MAX_GROUP_CHANNELS * 4, 0);
     gl.vertexAttribDivisor(4, 1);
     gl.bindBuffer(gl.ARRAY_BUFFER, instHealthVbo);
     gl.bufferData(gl.ARRAY_BUFFER, health, gl.DYNAMIC_DRAW);
@@ -1100,7 +1108,7 @@ window.addEventListener("DOMContentLoaded", () => {
             health: health[inspectEntityId],
             maxHealth: 100,
             money: money[inspectEntityId],
-            faction: groupAffiliations[inspectEntityId * 10],
+            faction: groupAffiliations[inspectEntityId * MAX_GROUP_CHANNELS],
             state: state[inspectEntityId],
             stateName:
               [
@@ -1122,8 +1130,8 @@ window.addEventListener("DOMContentLoaded", () => {
             positionY: positionY[inspectEntityId],
             groups: Array.from(
               groupAffiliations.slice(
-                inspectEntityId * 10,
-                inspectEntityId * 10 + 10,
+                inspectEntityId * MAX_GROUP_CHANNELS,
+                inspectEntityId * MAX_GROUP_CHANNELS + MAX_GROUP_CHANNELS,
               ) as unknown as number[],
             ).filter((g) => g !== -1),
             effectiveDamage: 10,

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import * as C from "./simulation/constants";
 import {
   BrutalButton,
   BrutalWindow,
