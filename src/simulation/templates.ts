@@ -1,5 +1,5 @@
-import * as C from './constants';
-import * as S from './state';
+import * as C from "./constants";
+import * as S from "./state";
 
 export function applyGroupTemplate(groupId: number, archetype: number): void {
   // Find empty slot in ruleRegistry
@@ -57,12 +57,16 @@ export function applyGroupTemplate(groupId: number, archetype: number): void {
   S.ruleRegistry[baseIdx + 1] = groupId;
   S.ruleRegistry[baseIdx + 2] = 255;
   S.ruleRegistry[baseIdx + 3] = 0;
-  
-  if (archetype === C.ARCHETYPE_NATION) S.ruleRegistry[baseIdx + 4] = C.EntityState.Trading;
-  else if (archetype === C.ARCHETYPE_ARMY) S.ruleRegistry[baseIdx + 4] = C.EntityState.Combat;
-  else if (archetype === C.ARCHETYPE_SPY) S.ruleRegistry[baseIdx + 4] = C.EntityState.Sabotaging;
-  else if (archetype === C.ARCHETYPE_CULT) S.ruleRegistry[baseIdx + 4] = C.EntityState.Fleeing;
-  
+
+  if (archetype === C.ARCHETYPE_NATION)
+    S.ruleRegistry[baseIdx + 4] = C.EntityState.Trading;
+  else if (archetype === C.ARCHETYPE_ARMY)
+    S.ruleRegistry[baseIdx + 4] = C.EntityState.Combat;
+  else if (archetype === C.ARCHETYPE_SPY)
+    S.ruleRegistry[baseIdx + 4] = C.EntityState.Sabotaging;
+  else if (archetype === C.ARCHETYPE_CULT)
+    S.ruleRegistry[baseIdx + 4] = C.EntityState.Fleeing;
+
   S.ruleRegistry[baseIdx + 5] = 0;
   S.ruleRegistry[baseIdx + 6] = 0;
   S.ruleRegistry[baseIdx + 7] = 1;

@@ -1,29 +1,53 @@
-import * as C from '../constants';
-import * as S from '../state';
-import * as U from '../utils';
+import * as C from "../constants";
+import * as S from "../state";
+import * as U from "../utils";
 
 /**
  * Lifecycle System
  * Handles aging, hunger, survival autonomy, and death cleanup.
  */
-export function runLifecycleSystem(state: SharedArrayBuffer, startIndex: number, endIndex: number): void {
+export function runLifecycleSystem(
+  state: SharedArrayBuffer,
+  startIndex: number,
+  endIndex: number,
+): void {
   for (let i = startIndex; i < endIndex; i++) {
     const traits = S.traitBitmask[i];
-    
+
     // Resource Regeneration (Special case for dead resource entities)
-    if (S.state[i] === C.EntityState.Dead && (traits & (C.TRAIT_TREE | C.TRAIT_GOLD | C.TRAIT_BUSH)) !== 0) {
-      if (Math.random() > 0.9995) { // Slow regen
+    if (
+      S.state[i] === C.EntityState.Dead &&
+      (traits & (C.TRAIT_TREE | C.TRAIT_GOLD | C.TRAIT_BUSH)) !== 0
+    ) {
+      if (Math.random() > 0.9995) {
+        // Slow regen
         let x = Math.random() * C.WORLD_WIDTH;
         let y = Math.random() * C.WORLD_HEIGHT;
-        const tx = Math.floor(x / C.TILE_SIZE), ty = Math.floor(y / C.TILE_SIZE);
-        const tileIdx = Math.min(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS - 1, Math.max(0, ty * C.WORLD_MAP_COLS + tx));
+        const tx = Math.floor(x / C.TILE_SIZE),
+          ty = Math.floor(y / C.TILE_SIZE);
+        const tileIdx = Math.min(
+          C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS - 1,
+          Math.max(0, ty * C.WORLD_MAP_COLS + tx),
+        );
         const terrain = S.worldMap[tileIdx];
         let valid = false;
-        if ((traits & C.TRAIT_GOLD) !== 0 && terrain === C.TerrainType.Water) valid = true;
-        else if ((traits & C.TRAIT_TREE) !== 0 && terrain === C.TerrainType.Forest) valid = true;
-        else if ((traits & C.TRAIT_BUSH) !== 0 && terrain === C.TerrainType.Grass) valid = true;
+        if ((traits & C.TRAIT_GOLD) !== 0 && terrain === C.TerrainType.Water)
+          valid = true;
+        else if (
+          (traits & C.TRAIT_TREE) !== 0 &&
+          terrain === C.TerrainType.Forest
+        )
+          valid = true;
+        else if (
+          (traits & C.TRAIT_BUSH) !== 0 &&
+          terrain === C.TerrainType.Grass
+        )
+          valid = true;
         if (valid) {
-          S.positionX[i] = x; S.positionY[i] = y; S.health[i] = 100; S.state[i] = C.EntityState.Idle;
+          S.positionX[i] = x;
+          S.positionY[i] = y;
+          S.health[i] = 100;
+          S.state[i] = C.EntityState.Idle;
         }
       }
       continue;
@@ -51,7 +75,11 @@ export function runLifecycleSystem(state: SharedArrayBuffer, startIndex: number,
     // 1. Survival Logic (Decay & Attrition)
     let decayRate = 1;
     if (S.money[i] > 0) decayRate = 0;
-    if (S.state[i] === C.EntityState.Harvesting || S.state[i] === C.EntityState.ReturningToDepot) decayRate = 0;
+    if (
+      S.state[i] === C.EntityState.Harvesting ||
+      S.state[i] === C.EntityState.ReturningToDepot
+    )
+      decayRate = 0;
     if (S.tickCount % (240 + (i % 60)) === 0) S.health[i] -= decayRate;
 
     // Starvation damage
@@ -69,7 +97,8 @@ export function runLifecycleSystem(state: SharedArrayBuffer, startIndex: number,
 
     // Territorial Attrition
     if (S.tickCount % 60 === 0) {
-      const tx = Math.floor(S.positionX[i] / C.TILE_SIZE), ty = Math.floor(S.positionY[i] / C.TILE_SIZE);
+      const tx = Math.floor(S.positionX[i] / C.TILE_SIZE),
+        ty = Math.floor(S.positionY[i] / C.TILE_SIZE);
       const tileIdx = ty * C.WORLD_MAP_COLS + tx;
       if (tileIdx >= 0 && tileIdx < S.territoryOwnerMap.length) {
         const owner = S.territoryOwnerMap[tileIdx];
@@ -84,36 +113,66 @@ export function runLifecycleSystem(state: SharedArrayBuffer, startIndex: number,
     }
 
     // 2. Autonomy State Machine (Decision Making)
-    if (S.targetEntityId[i] !== -3 && S.state[i] !== C.EntityState.Combat && S.state[i] !== C.EntityState.Trading && S.state[i] !== C.EntityState.ReportingIntel) {
+    if (
+      S.targetEntityId[i] !== -3 &&
+      S.state[i] !== C.EntityState.Combat &&
+      S.state[i] !== C.EntityState.Trading &&
+      S.state[i] !== C.EntityState.ReportingIntel
+    ) {
       const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS + 0];
       let survivalTask: number = -1;
-      
+
       // Hunger/Survival Check
       if (gid >= 0 && gid < C.MAX_GROUPS) {
         const groupFood = S.groupFood[gid];
         const pop = S.groupPopulationCount[gid];
         const foodNeeded = Math.max(1, Math.floor(pop * 0.1));
         if (groupFood > 0 && groupFood < foodNeeded * 5) {
-          const bushId = U.findNearest(S.positionX[i], S.positionY[i], 500, C.TRAIT_BUSH);
-          if (bushId !== -1) { survivalTask = 0; S.targetEntityId[i] = bushId; S.targetBuildingId[i] = -1; }
-          else {
-            const fieldId = U.findNearestBuilding(S.positionX[i], S.positionY[i], 500, C.BuildingType.Field);
-            if (fieldId !== -1 && S.bldOwnerGroup[fieldId] === gid) { survivalTask = 1; S.targetBuildingId[i] = fieldId; S.targetEntityId[i] = -1; }
+          const bushId = U.findNearest(
+            S.positionX[i],
+            S.positionY[i],
+            500,
+            C.TRAIT_BUSH,
+          );
+          if (bushId !== -1) {
+            survivalTask = 0;
+            S.targetEntityId[i] = bushId;
+            S.targetBuildingId[i] = -1;
+          } else {
+            const fieldId = U.findNearestBuilding(
+              S.positionX[i],
+              S.positionY[i],
+              500,
+              C.BuildingType.Field,
+            );
+            if (fieldId !== -1 && S.bldOwnerGroup[fieldId] === gid) {
+              survivalTask = 1;
+              S.targetBuildingId[i] = fieldId;
+              S.targetEntityId[i] = -1;
+            }
           }
         }
       }
-      
-      if (survivalTask !== -1) { 
-        S.state[i] = C.EntityState.Harvesting; 
-        S.actionTimer[i] = 0; 
+
+      if (survivalTask !== -1) {
+        S.state[i] = C.EntityState.Harvesting;
+        S.actionTimer[i] = 0;
       } else {
         // Threat Check
-        const enemyId = U.findNearest(S.positionX[i], S.positionY[i], 120, C.TRAIT_AGGRESSIVE);
-        if (enemyId !== -1) { 
-          S.state[i] = C.EntityState.Fleeing; 
-          S.targetEntityId[i] = enemyId; 
-          S.actionTimer[i] = 120; 
-        } else if (S.state[i] === C.EntityState.Idle && S.tickCount % (60 + (i % 30)) === 0) {
+        const enemyId = U.findNearest(
+          S.positionX[i],
+          S.positionY[i],
+          120,
+          C.TRAIT_AGGRESSIVE,
+        );
+        if (enemyId !== -1) {
+          S.state[i] = C.EntityState.Fleeing;
+          S.targetEntityId[i] = enemyId;
+          S.actionTimer[i] = 120;
+        } else if (
+          S.state[i] === C.EntityState.Idle &&
+          S.tickCount % (60 + (i % 30)) === 0
+        ) {
           // Looting discovery
           const tx = Math.floor(S.positionX[i] / C.GRID_SIZE);
           const ty = Math.floor(S.positionY[i] / C.GRID_SIZE);
@@ -124,7 +183,10 @@ export function runLifecycleSystem(state: SharedArrayBuffer, startIndex: number,
               const defId = S.itemInstanceDefId[itemId];
               const baseType = S.itemDefBaseType[defId];
               if (baseType === C.ITEM_BASE_MELEE) {
-                if (S.charWeapon[i] === -1 || S.itemDefStatA[defId] > S.effectiveDamage[i]) {
+                if (
+                  S.charWeapon[i] === -1 ||
+                  S.itemDefStatA[defId] > S.effectiveDamage[i]
+                ) {
                   S.targetItemId[i] = itemId;
                   S.state[i] = C.EntityState.Looting;
                   break;
@@ -142,19 +204,33 @@ export function runLifecycleSystem(state: SharedArrayBuffer, startIndex: number,
       const deadX = S.positionX[i];
       const deadY = S.positionY[i];
       const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS + 0];
-      
+
       // Drop loot on death
       if (S.money[i] > 0) {
         const moneyPerItem = 100;
         const count = Math.min(10, Math.floor(S.money[i] / moneyPerItem));
         for (let l = 0; l < count; l++) {
-          U.createItemInstance(1, 1, deadX + (Math.random() - 0.5) * 10, deadY + (Math.random() - 0.5) * 10);
+          U.createItemInstance(
+            1,
+            1,
+            deadX + (Math.random() - 0.5) * 10,
+            deadY + (Math.random() - 0.5) * 10,
+          );
         }
       }
-      
-      if (S.charWeapon[i] !== -1) { U.setItemInstanceGround(S.charWeapon[i], deadX, deadY); S.charWeapon[i] = -1; }
-      if (S.charArmor[i] !== -1) { U.setItemInstanceGround(S.charArmor[i], deadX, deadY); S.charArmor[i] = -1; }
-      if (S.charTool[i] !== -1) { U.setItemInstanceGround(S.charTool[i], deadX, deadY); S.charTool[i] = -1; }
+
+      if (S.charWeapon[i] !== -1) {
+        U.setItemInstanceGround(S.charWeapon[i], deadX, deadY);
+        S.charWeapon[i] = -1;
+      }
+      if (S.charArmor[i] !== -1) {
+        U.setItemInstanceGround(S.charArmor[i], deadX, deadY);
+        S.charArmor[i] = -1;
+      }
+      if (S.charTool[i] !== -1) {
+        U.setItemInstanceGround(S.charTool[i], deadX, deadY);
+        S.charTool[i] = -1;
+      }
 
       S.state[i] = C.EntityState.Dead;
       S.positionX[i] = -10000;

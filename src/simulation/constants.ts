@@ -52,7 +52,7 @@ export const ACTION_SPAWN_DEFENSE_PROJECTILE = 101;
 export const ACTION_DECLARE_WAR = 102;
 
 // Phase 21: Game Time
-export const TICKS_PER_DAY = 3600;  // 60 ticks/sec × 60 sec = 1 minute real-time = 1 game day
+export const TICKS_PER_DAY = 3600; // 60 ticks/sec × 60 sec = 1 minute real-time = 1 game day
 export const DAYS_PER_MONTH = 30;
 export const MONTHS_PER_YEAR = 12;
 export const TICKS_PER_YEAR = TICKS_PER_DAY * DAYS_PER_MONTH * MONTHS_PER_YEAR;
@@ -67,7 +67,7 @@ export enum EntityState {
   Trading = 6,
   ReportingIntel = 7,
   Construction = 8,
-  Sabotaging = 9,  // Phase 23: Spy sabotage state
+  Sabotaging = 9, // Phase 23: Spy sabotage state
   Looting = 10,
 }
 
@@ -123,7 +123,7 @@ export const ITEM_BASE_CONSUMABLE = 4;
 
 // Item Traits
 export const ITEM_TRAIT_NONE = 0;
-export const ITEM_TRAIT_CURSED = 1 << 0;  // Modifies lifespan or health parameters negatively
+export const ITEM_TRAIT_CURSED = 1 << 0; // Modifies lifespan or health parameters negatively
 export const ITEM_TRAIT_VAMPIRE = 1 << 1; // Transfers health variables during combat ticks
 export const ITEM_TRAIT_BLESSED = 1 << 2; // Increases statutory recovery velocity
 
@@ -137,9 +137,9 @@ export const GATE_OR = 101;
 export const GATE_NOT = 102;
 export const OP_END = 255;
 
-export const OP_TICK_MODULO = 10;   // Interval timer
+export const OP_TICK_MODULO = 10; // Interval timer
 export const OP_RANDOM_CHANCE = 11; // Probability dice roll
-export const OP_COHESION_LT = 12;   // Stability check
+export const OP_COHESION_LT = 12; // Stability check
 
 export const ARCHETYPE_NONE = 0;
 export const ARCHETYPE_NATION = 1;
@@ -166,10 +166,10 @@ export const COHESION_DECAY_RATE = 5;
 export const COHESION_GROWTH_RATE = 1;
 
 // Phase 23: Spy Sabotage Constants
-export const SPY_SABOTAGE_RANGE = 5;  // 5-unit radius (squared = 25)
+export const SPY_SABOTAGE_RANGE = 5; // 5-unit radius (squared = 25)
 export const SPY_WEALTH_DRAIN = 500;
 export const SPY_TRUST_DECAY = 10;
-export const SPY_SABOTAGE_INTERVAL = 60;  // Every 60 frames
+export const SPY_SABOTAGE_INTERVAL = 60; // Every 60 frames
 
 // Phase 22: Building Influence Radii (units)
 export const INFLUENCE_RADIUS_WAREHOUSE = 200;

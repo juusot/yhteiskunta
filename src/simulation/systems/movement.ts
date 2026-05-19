@@ -1,14 +1,22 @@
-import * as C from '../constants';
-import * as S from '../state';
+import * as C from "../constants";
+import * as S from "../state";
 
 /**
  * Movement System
  * Integrates velocity into position and handles collision/bounds.
  */
-export function runMovementSystem(state: SharedArrayBuffer, startIndex: number, endIndex: number): void {
+export function runMovementSystem(
+  state: SharedArrayBuffer,
+  startIndex: number,
+  endIndex: number,
+): void {
   // 1. Entities
   for (let i = startIndex; i < endIndex; i++) {
-    if (S.state[i] === C.EntityState.Dead || (S.traitBitmask[i] & (C.TRAIT_TREE | C.TRAIT_GOLD | C.TRAIT_BUSH)) !== 0) continue;
+    if (
+      S.state[i] === C.EntityState.Dead ||
+      (S.traitBitmask[i] & (C.TRAIT_TREE | C.TRAIT_GOLD | C.TRAIT_BUSH)) !== 0
+    )
+      continue;
     if (S.isMounted[i] === 1) continue;
 
     let moveX = S.velocityX[i];
@@ -20,8 +28,13 @@ export function runMovementSystem(state: SharedArrayBuffer, startIndex: number, 
     const tileIdx = ty * C.WORLD_MAP_COLS + tx;
     if (tileIdx >= 0 && tileIdx < S.worldMap.length) {
       const terrain = S.worldMap[tileIdx];
-      if (terrain === C.TerrainType.Forest) { moveX *= 0.6; moveY *= 0.6; }
-      else if (terrain === C.TerrainType.Water) { moveX *= 0.3; moveY *= 0.3; }
+      if (terrain === C.TerrainType.Forest) {
+        moveX *= 0.6;
+        moveY *= 0.6;
+      } else if (terrain === C.TerrainType.Water) {
+        moveX *= 0.3;
+        moveY *= 0.3;
+      }
     }
 
     S.positionX[i] += moveX;
@@ -49,11 +62,16 @@ export function runMovementSystem(state: SharedArrayBuffer, startIndex: number, 
     if (tx >= 0 && tx < C.WORLD_MAP_COLS && ty >= 0 && ty < C.WORLD_MAP_ROWS) {
       const terrain = S.worldMap[tileIdx];
       let blocked = false;
-      if (S.vehType[i] === C.VEHICLE_SHIP && terrain !== C.TerrainType.Water) blocked = true;
-      if (S.vehType[i] === C.VEHICLE_WAGON && (terrain === C.TerrainType.Water || terrain === C.TerrainType.Mountain)) blocked = true;
-      
+      if (S.vehType[i] === C.VEHICLE_SHIP && terrain !== C.TerrainType.Water)
+        blocked = true;
+      if (
+        S.vehType[i] === C.VEHICLE_WAGON &&
+        (terrain === C.TerrainType.Water || terrain === C.TerrainType.Mountain)
+      )
+        blocked = true;
+
       if (blocked) {
-        S.vehVelocityX[i] = 0; 
+        S.vehVelocityX[i] = 0;
         S.vehVelocityY[i] = 0;
         continue;
       }

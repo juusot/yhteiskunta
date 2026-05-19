@@ -1,18 +1,18 @@
 // src/simulationWorker.ts
 console.log("Simulation Worker starting...");
-import * as C from './simulation/constants';
-import * as S from './simulation/state';
-import * as U from './simulation/utils';
-import * as P from './simulation/systems/parallel';
-import * as M from './simulation/systems/master';
-import { rebuildSpatialHash } from './simulation/systems/spatialHash';
-import { runSteeringSystem } from './simulation/systems/steering';
-import { runMovementSystem } from './simulation/systems/movement';
-import { runCombatSystem } from './simulation/systems/combat';
-import { runGatheringSystem } from './simulation/systems/gathering';
-import { runLifecycleSystem } from './simulation/systems/lifecycle';
-import { initializeWorld } from './simulation/initialization';
-import { applyGroupTemplate } from './simulation/templates';
+import * as C from "./simulation/constants";
+import * as S from "./simulation/state";
+import * as U from "./simulation/utils";
+import * as P from "./simulation/systems/parallel";
+import * as M from "./simulation/systems/master";
+import { rebuildSpatialHash } from "./simulation/systems/spatialHash";
+import { runSteeringSystem } from "./simulation/systems/steering";
+import { runMovementSystem } from "./simulation/systems/movement";
+import { runCombatSystem } from "./simulation/systems/combat";
+import { runGatheringSystem } from "./simulation/systems/gathering";
+import { runLifecycleSystem } from "./simulation/systems/lifecycle";
+import { initializeWorld } from "./simulation/initialization";
+import { applyGroupTemplate } from "./simulation/templates";
 
 function tick(): void {
   if (S.isPaused) return;
@@ -56,7 +56,7 @@ function tick(): void {
   // Phase 3: Master Orchestration (Only worker 0)
   if (S.quadrantIndex === 0) {
     M.SummarySystem(); // Uses the aggregated stats from parallel systems
-    
+
     if (S.tickCount % 60 === 0) {
       M.RuleEvaluationSystem();
       M.TradeSystem();
@@ -66,14 +66,14 @@ function tick(): void {
       M.StructureEvolutionSystem();
     }
     M.GroupKnowledgeDecaySystem();
-    M.BuffSystem(); 
+    M.BuffSystem();
   }
 
   // Barrier 3: Ensure worker 0 finished master logic before anyone increments tick
   U.waitForAll(3);
 
   if (S.quadrantIndex === 0) S.incrementTick();
-  
+
   // Final barrier to keep workers in lock-step
   U.waitForAll(4);
 }
@@ -87,7 +87,7 @@ self.onmessage = (e: MessageEvent) => {
     if (S.quadrantIndex === 0) {
       S.initializeState();
       initializeWorld();
-      
+
       // Post initialized with buffers
       self.postMessage({
         type: "INITIALIZED",
@@ -195,30 +195,38 @@ self.onmessage = (e: MessageEvent) => {
           projVelocityY: S.projVelocityY.buffer,
           projType: S.projType.buffer,
           projOwnerGroup: S.projOwnerGroup.buffer,
-          projLifeTime: S.projLifeTime.buffer
-        }
+          projLifeTime: S.projLifeTime.buffer,
+        },
       });
     } else {
       S.mapStateBuffers(data.payload.buffers);
     }
   }
-  
+
   if (type === "TICK") {
     try {
       tick();
       self.postMessage({ type: "TICK_COMPLETE" });
     } catch (e) {
       console.error("Worker Tick Error:", e);
-      self.postMessage({ type: "TICK_ERROR", payload: e instanceof Error ? e.message : String(e) });
+      self.postMessage({
+        type: "TICK_ERROR",
+        payload: e instanceof Error ? e.message : String(e),
+      });
     }
   }
-  
+
   if (type === "PAUSE_SIM") S.setPaused(true);
   if (type === "RESUME_SIM") S.setPaused(false);
-  
+
   if (type === "GROUP_COMMAND") {
     const payload = data.payload || data;
-    U.broadcastGroupCommand(payload.groupId, payload.commandState, payload.targetX, payload.targetY);
+    U.broadcastGroupCommand(
+      payload.groupId,
+      payload.commandState,
+      payload.targetX,
+      payload.targetY,
+    );
   }
 
   if (type === "PLAYER_COMMAND_MOVE") {
@@ -228,13 +236,13 @@ self.onmessage = (e: MessageEvent) => {
       const gid = S.groupAffiliations[entityId * C.MAX_GROUP_CHANNELS + 0];
       if (gid !== S.scenarioState[0]) return;
     }
-    
+
     S.playerTargetX[entityId] = tx;
     S.playerTargetY[entityId] = ty;
     S.targetEntityId[entityId] = -3; // Token code indicating player override state
     S.state[entityId] = C.EntityState.Idle; // Interrupt current automated state machine
   }
-  
+
   if (type === "CREATE_GROUP") {
     const { name, archetype } = data.payload;
     const groupId = U.createGroup(name);
@@ -242,45 +250,56 @@ self.onmessage = (e: MessageEvent) => {
       applyGroupTemplate(groupId, archetype);
     }
   }
-  
+
   if (type === "ASSIGN_TO_GROUP") {
     const { entityId, groupId, slot } = data.payload;
     U.assignCharacterToGroup(entityId, groupId, slot);
   }
-  
+
   if (type === "SEND_EVENT") {
     const { groupId, eventType } = data.payload;
     U.sendEventToGroup(groupId, eventType);
   }
-  
+
   if (type === "KILL_ENTITY") {
     const { entityId } = data.payload;
     S.state[entityId] = C.EntityState.Dead;
     S.health[entityId] = 0;
   }
-  
+
   if (type === "SYNC_TICK") S.setTick(data.tickCount);
-  
+
   if (type === "FIND_ENTITY") {
     const { x, y, radius } = data.payload;
-    const id = U.findNearest(x, y, radius, 0xFFFFFFFF);
+    const id = U.findNearest(x, y, radius, 0xffffffff);
     self.postMessage({ type: "ENTITY_FOUND", payload: { id } });
   }
-  
+
   if (type === "PAINT_ENTITIES") {
     const { x, y, radius, groupId, traitBitmask: newTrait } = data.payload;
     const radiusSq = radius * radius;
     const minCellX = Math.max(0, Math.floor((x - radius) / C.GRID_SIZE));
-    const maxCellX = Math.min(C.GRID_COLS - 1, Math.floor((x + radius) / C.GRID_SIZE));
+    const maxCellX = Math.min(
+      C.GRID_COLS - 1,
+      Math.floor((x + radius) / C.GRID_SIZE),
+    );
     const minCellY = Math.max(0, Math.floor((y - radius) / C.GRID_SIZE));
-    const maxCellY = Math.min(C.GRID_ROWS - 1, Math.floor((y + radius) / C.GRID_SIZE));
-    
+    const maxCellY = Math.min(
+      C.GRID_ROWS - 1,
+      Math.floor((y + radius) / C.GRID_SIZE),
+    );
+
     for (let cy = minCellY; cy <= maxCellY; cy++) {
       for (let cx = minCellX; cx <= maxCellX; cx++) {
         const cellIndex = cy * C.GRID_COLS + cx;
         let entityId = S.spatialHead[cellIndex];
         while (entityId !== -1) {
-          if (S.positionX[entityId] < S.minX || S.positionX[entityId] >= S.maxX || S.positionY[entityId] < S.minY || S.positionY[entityId] >= S.maxY) {
+          if (
+            S.positionX[entityId] < S.minX ||
+            S.positionX[entityId] >= S.maxX ||
+            S.positionY[entityId] < S.minY ||
+            S.positionY[entityId] >= S.maxY
+          ) {
             entityId = S.spatialNext[entityId];
             continue;
           }
@@ -291,7 +310,8 @@ self.onmessage = (e: MessageEvent) => {
             if (newTrait !== 0) {
               S.traitBitmask[entityId] |= newTrait;
               if ((newTrait & C.TRAIT_TREE) !== 0) {
-                S.velocityX[entityId] = 0; S.velocityY[entityId] = 0;
+                S.velocityX[entityId] = 0;
+                S.velocityY[entityId] = 0;
               }
             }
           }

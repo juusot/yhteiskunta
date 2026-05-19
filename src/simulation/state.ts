@@ -1,5 +1,5 @@
 // src/simulation/state.ts
-import * as C from './constants';
+import * as C from "./constants";
 
 // Global Component Arrays
 export let positionX: Float32Array;
@@ -31,14 +31,14 @@ export let charArmor: Int32Array;
 export let charTool: Int32Array;
 
 // Phase 21: Character Base Stats
-export let lifespan: Int16Array;        // Base years (default: 80)
-export let damage: Int16Array;          // Base damage (default: 10)
-export let speed: Float32Array;         // Base movement multiplier (default: 1.0)
+export let lifespan: Int16Array; // Base years (default: 80)
+export let damage: Int16Array; // Base damage (default: 10)
+export let speed: Float32Array; // Base movement multiplier (default: 1.0)
 
 // Phase 21: Effective Stats (cached, updated on buff change)
-export let effectiveLifespan: Int16Array;   // Base + buffs
-export let effectiveDamage: Int16Array;     // Base + buffs
-export let effectiveSpeed: Float32Array;    // Base × buffs
+export let effectiveLifespan: Int16Array; // Base + buffs
+export let effectiveDamage: Int16Array; // Base + buffs
+export let effectiveSpeed: Float32Array; // Base × buffs
 
 // Spatial Partitioning Arrays (Shared between workers)
 export let spatialHead: Int32Array;
@@ -60,7 +60,7 @@ export let groupTargetY: Float32Array;
 export let groupTargetAge: Int32Array;
 
 // Phase 21: Group Metadata
-export let groupCreatedAt: Int32Array;  // Game day when group was created
+export let groupCreatedAt: Int32Array; // Game day when group was created
 
 // Phase 12: Group Logistics
 export let groupWarehouseX: Float32Array;
@@ -134,16 +134,16 @@ export let vehPilotId: Int32Array; // Character currently driving
 export let vehOwnerGroup: Int32Array;
 
 // Items
-export let itemDefBaseType: Uint8Array;    // Size: MAX_ITEM_DEFINITIONS
-export let itemDefStatA: Int32Array;       // Size: MAX_ITEM_DEFINITIONS (Melee=Damage, Consumable=Heal)
-export let itemDefStatB: Int32Array;       // Size: MAX_ITEM_DEFINITIONS (Melee=Cooldown, Ranged=Range)
-export let itemDefTraitMask: Uint32Array;  // Size: MAX_ITEM_DEFINITIONS (Bitmask tracking effects)
+export let itemDefBaseType: Uint8Array; // Size: MAX_ITEM_DEFINITIONS
+export let itemDefStatA: Int32Array; // Size: MAX_ITEM_DEFINITIONS (Melee=Damage, Consumable=Heal)
+export let itemDefStatB: Int32Array; // Size: MAX_ITEM_DEFINITIONS (Melee=Cooldown, Ranged=Range)
+export let itemDefTraitMask: Uint32Array; // Size: MAX_ITEM_DEFINITIONS (Bitmask tracking effects)
 
 export let itemInstanceDefId: Uint16Array; // Size: MAX_ITEM_INSTANCES (Points to Item Definition index)
 export let itemInstanceOwnerType: Uint8Array; // Size: MAX_ITEM_INSTANCES (Inactive, Ground, WH, Char)
-export let itemInstanceOwnerId: Int32Array;   // Size: MAX_ITEM_INSTANCES (Entity ID or Group ID owner index)
-export let itemInstanceX: Float32Array;       // Size: MAX_ITEM_INSTANCES (World position on ground)
-export let itemInstanceY: Float32Array;       // Size: MAX_ITEM_INSTANCES (World position on ground)
+export let itemInstanceOwnerId: Int32Array; // Size: MAX_ITEM_INSTANCES (Entity ID or Group ID owner index)
+export let itemInstanceX: Float32Array; // Size: MAX_ITEM_INSTANCES (World position on ground)
+export let itemInstanceY: Float32Array; // Size: MAX_ITEM_INSTANCES (World position on ground)
 
 // Phase 25: Player Interaction
 export let playerTargetX: Float32Array; // Size: C.MAX_ENTITIES * 4 bytes
@@ -162,7 +162,10 @@ export let projOwnerGroup: Int32Array;
 export let projLifeTime: Int16Array;
 
 export let quadrantIndex: number = -1;
-export let minX = 0, maxX = 1600, minY = 0, maxY = 1200;
+export let minX = 0,
+  maxX = 1600,
+  minY = 0,
+  maxY = 1200;
 export let tickCount = 0;
 export let isPaused = false;
 
@@ -178,15 +181,38 @@ export let entityNames: Map<number, string>;
 
 export function setQuadrantIndex(idx: number) {
   quadrantIndex = idx;
-  if (quadrantIndex === 0) { minX = 0; maxX = 800; minY = 0; maxY = 600; }
-  else if (quadrantIndex === 1) { minX = 800; maxX = 1600; minY = 0; maxY = 600; }
-  else if (quadrantIndex === 2) { minX = 0; maxX = 800; minY = 600; maxY = 1200; }
-  else if (quadrantIndex === 3) { minX = 800; maxX = 1600; minY = 600; maxY = 1200; }
+  if (quadrantIndex === 0) {
+    minX = 0;
+    maxX = 800;
+    minY = 0;
+    maxY = 600;
+  } else if (quadrantIndex === 1) {
+    minX = 800;
+    maxX = 1600;
+    minY = 0;
+    maxY = 600;
+  } else if (quadrantIndex === 2) {
+    minX = 0;
+    maxX = 800;
+    minY = 600;
+    maxY = 1200;
+  } else if (quadrantIndex === 3) {
+    minX = 800;
+    maxX = 1600;
+    minY = 600;
+    maxY = 1200;
+  }
 }
 
-export function incrementTick() { tickCount++; }
-export function setTick(t: number) { tickCount = t; }
-export function setPaused(p: boolean) { isPaused = p; }
+export function incrementTick() {
+  tickCount++;
+}
+export function setTick(t: number) {
+  tickCount = t;
+}
+export function setPaused(p: boolean) {
+  isPaused = p;
+}
 
 export function initializeState(): void {
   // Master only: Allocate SharedArrayBuffers
@@ -208,8 +234,12 @@ export function initializeState(): void {
   targetItemId.fill(-1);
   isMounted = new Uint8Array(new SharedArrayBuffer(C.MAX_ENTITIES));
   isMounted.fill(0);
-  pendingEvents = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * C.EVENT_SLOTS_PER_CHARACTER * 4));
-  carriedIntelEntityId = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
+  pendingEvents = new Int32Array(
+    new SharedArrayBuffer(C.MAX_ENTITIES * C.EVENT_SLOTS_PER_CHARACTER * 4),
+  );
+  carriedIntelEntityId = new Int32Array(
+    new SharedArrayBuffer(C.MAX_ENTITIES * 4),
+  );
   carriedIntelX = new Float32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
   carriedIntelY = new Float32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
   mana = new Int16Array(new SharedArrayBuffer(C.MAX_ENTITIES * 2));
@@ -226,9 +256,13 @@ export function initializeState(): void {
   effectiveLifespan = new Int16Array(new SharedArrayBuffer(C.MAX_ENTITIES * 2));
   effectiveDamage = new Int16Array(new SharedArrayBuffer(C.MAX_ENTITIES * 2));
   effectiveSpeed = new Float32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
-  groupAffiliations = new Int32Array(new SharedArrayBuffer(C.MAX_ENTITIES * C.MAX_GROUP_CHANNELS * 4));
+  groupAffiliations = new Int32Array(
+    new SharedArrayBuffer(C.MAX_ENTITIES * C.MAX_GROUP_CHANNELS * 4),
+  );
   groupCohesion = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
-  activeCommandPriority = new Uint8Array(new SharedArrayBuffer(C.MAX_ENTITIES * 1));
+  activeCommandPriority = new Uint8Array(
+    new SharedArrayBuffer(C.MAX_ENTITIES * 1),
+  );
   activePrioritySlot = new Int8Array(new SharedArrayBuffer(C.MAX_ENTITIES * 1));
   groupTargetEntityId = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   groupTargetX = new Float32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
@@ -238,24 +272,38 @@ export function initializeState(): void {
   groupWarehouseX = new Float32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   groupWarehouseY = new Float32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   groupMagicFrequency = new Int8Array(new SharedArrayBuffer(C.MAX_GROUPS));
-  groupRelationsMatrix = new Int8Array(new SharedArrayBuffer(C.MAX_GROUPS * C.MAX_GROUPS));
+  groupRelationsMatrix = new Int8Array(
+    new SharedArrayBuffer(C.MAX_GROUPS * C.MAX_GROUPS),
+  );
   groupVisualArchetypes = new Int8Array(new SharedArrayBuffer(C.MAX_GROUPS));
   groupNames = new Map<number, string>();
   entityNames = new Map<number, string>();
   ruleRegistry = new Int32Array(new SharedArrayBuffer(C.MAX_RULES * 8 * 4));
   workerSync = new Int32Array(new SharedArrayBuffer(8 * 4));
-  logicBytecode = new Int32Array(new SharedArrayBuffer(C.MAX_RULES * C.MAX_BYTECODE_PER_RULE * 4));
-  groupPopulationCount = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
+  logicBytecode = new Int32Array(
+    new SharedArrayBuffer(C.MAX_RULES * C.MAX_BYTECODE_PER_RULE * 4),
+  );
+  groupPopulationCount = new Int32Array(
+    new SharedArrayBuffer(C.MAX_GROUPS * 4),
+  );
   groupBuildingCount = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   groupTotalWealth = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   groupWood = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   groupGold = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   groupFood = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   groupMisc = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
-  worldMap = new Uint8Array(new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS));
-  globalFlowField = new Float32Array(new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS * 2 * 4));
-  influenceMap = new Int16Array(new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS * 2));
-  territoryOwnerMap = new Int32Array(new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS * 4));
+  worldMap = new Uint8Array(
+    new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS),
+  );
+  globalFlowField = new Float32Array(
+    new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS * 2 * 4),
+  );
+  influenceMap = new Int16Array(
+    new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS * 2),
+  );
+  territoryOwnerMap = new Int32Array(
+    new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS * 4),
+  );
 
   spatialHead = new Int32Array(new SharedArrayBuffer(C.NUM_CELLS * 4));
   spatialHead.fill(-1);
@@ -271,12 +319,16 @@ export function initializeState(): void {
   vehSpatialNext.fill(-1);
   itemSpatialHead = new Int32Array(new SharedArrayBuffer(C.NUM_CELLS * 4));
   itemSpatialHead.fill(-1);
-  itemSpatialNext = new Int32Array(new SharedArrayBuffer(C.MAX_ITEM_INSTANCES * 4));
+  itemSpatialNext = new Int32Array(
+    new SharedArrayBuffer(C.MAX_ITEM_INSTANCES * 4),
+  );
   itemSpatialNext.fill(-1);
 
   groupHouseCapacity = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   starvingGroups = new Uint8Array(new SharedArrayBuffer(C.MAX_GROUPS));
-  flowQueue = new Uint32Array(new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS * 4));
+  flowQueue = new Uint32Array(
+    new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS * 4),
+  );
 
   // Buildings
   bldPositionX = new Float32Array(new SharedArrayBuffer(C.MAX_BUILDINGS * 4));
@@ -300,16 +352,34 @@ export function initializeState(): void {
   vehOwnerGroup = new Int32Array(new SharedArrayBuffer(C.MAX_VEHICLES * 4));
 
   // Items
-  itemDefBaseType = new Uint8Array(new SharedArrayBuffer(C.MAX_ITEM_DEFINITIONS));
-  itemDefStatA = new Int32Array(new SharedArrayBuffer(C.MAX_ITEM_DEFINITIONS * 4));
-  itemDefStatB = new Int32Array(new SharedArrayBuffer(C.MAX_ITEM_DEFINITIONS * 4));
-  itemDefTraitMask = new Uint32Array(new SharedArrayBuffer(C.MAX_ITEM_DEFINITIONS * 4));
+  itemDefBaseType = new Uint8Array(
+    new SharedArrayBuffer(C.MAX_ITEM_DEFINITIONS),
+  );
+  itemDefStatA = new Int32Array(
+    new SharedArrayBuffer(C.MAX_ITEM_DEFINITIONS * 4),
+  );
+  itemDefStatB = new Int32Array(
+    new SharedArrayBuffer(C.MAX_ITEM_DEFINITIONS * 4),
+  );
+  itemDefTraitMask = new Uint32Array(
+    new SharedArrayBuffer(C.MAX_ITEM_DEFINITIONS * 4),
+  );
 
-  itemInstanceDefId = new Uint16Array(new SharedArrayBuffer(C.MAX_ITEM_INSTANCES * 2));
-  itemInstanceOwnerType = new Uint8Array(new SharedArrayBuffer(C.MAX_ITEM_INSTANCES));
-  itemInstanceOwnerId = new Int32Array(new SharedArrayBuffer(C.MAX_ITEM_INSTANCES * 4));
-  itemInstanceX = new Float32Array(new SharedArrayBuffer(C.MAX_ITEM_INSTANCES * 4));
-  itemInstanceY = new Float32Array(new SharedArrayBuffer(C.MAX_ITEM_INSTANCES * 4));
+  itemInstanceDefId = new Uint16Array(
+    new SharedArrayBuffer(C.MAX_ITEM_INSTANCES * 2),
+  );
+  itemInstanceOwnerType = new Uint8Array(
+    new SharedArrayBuffer(C.MAX_ITEM_INSTANCES),
+  );
+  itemInstanceOwnerId = new Int32Array(
+    new SharedArrayBuffer(C.MAX_ITEM_INSTANCES * 4),
+  );
+  itemInstanceX = new Float32Array(
+    new SharedArrayBuffer(C.MAX_ITEM_INSTANCES * 4),
+  );
+  itemInstanceY = new Float32Array(
+    new SharedArrayBuffer(C.MAX_ITEM_INSTANCES * 4),
+  );
 
   // Player Interaction
   playerTargetX = new Float32Array(new SharedArrayBuffer(C.MAX_ENTITIES * 4));
@@ -319,15 +389,23 @@ export function initializeState(): void {
 
   scenarioState = new Int32Array(new SharedArrayBuffer(16));
   scenarioState[0] = -1; // allowedGroupId
-  scenarioState[1] = 0;  // targetMetric
-  scenarioState[2] = 0;  // targetValue
+  scenarioState[1] = 0; // targetMetric
+  scenarioState[2] = 0; // targetValue
   scenarioState[3] = -1; // targetGroupId
 
   // Projectiles
-  projPositionX = new Float32Array(new SharedArrayBuffer(C.MAX_PROJECTILES * 4));
-  projPositionY = new Float32Array(new SharedArrayBuffer(C.MAX_PROJECTILES * 4));
-  projVelocityX = new Float32Array(new SharedArrayBuffer(C.MAX_PROJECTILES * 4));
-  projVelocityY = new Float32Array(new SharedArrayBuffer(C.MAX_PROJECTILES * 4));
+  projPositionX = new Float32Array(
+    new SharedArrayBuffer(C.MAX_PROJECTILES * 4),
+  );
+  projPositionY = new Float32Array(
+    new SharedArrayBuffer(C.MAX_PROJECTILES * 4),
+  );
+  projVelocityX = new Float32Array(
+    new SharedArrayBuffer(C.MAX_PROJECTILES * 4),
+  );
+  projVelocityY = new Float32Array(
+    new SharedArrayBuffer(C.MAX_PROJECTILES * 4),
+  );
   projType = new Uint8Array(new SharedArrayBuffer(C.MAX_PROJECTILES));
   projOwnerGroup = new Int32Array(new SharedArrayBuffer(C.MAX_PROJECTILES * 4));
   projLifeTime = new Int16Array(new SharedArrayBuffer(C.MAX_PROJECTILES * 2));
@@ -462,4 +540,3 @@ function initializeLocalState(): void {
   integrationField = new Float32Array(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS);
   settlementTimerMap = new Int16Array(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS);
 }
-

@@ -311,22 +311,22 @@ To prevent CPU bottlenecking, the main thread streams raw arrays directly to the
 
 ### **File Reference Table**
 
-| Path                                    | Primary Architectural Responsibility                                            |
-| :-------------------------------------- | :------------------------------------------------------------------------------ |
-| `src/simulation/constants.ts`           | Simulation limits, OpCode numbers, time constants, and enum states.             |
-| `src/simulation/state.ts`               | Declares and maps all SharedArrayBuffer typed array buffers.                    |
-| `src/simulation/initialization.ts`      | World generation, river curves, and default item definitions.                   |
-| `src/simulation/utils.ts`               | Thread synchronization barriers, spatial queries, and group management.         |
-| `src/simulation/buffs.ts`               | Sparse buff management, item traits, and effective stats recalculation.         |
-| `src/simulation/systems/spatialHash.ts` | Rebuilds the linked-list grid for fast $O(1)$ spatial queries.                 |
-| `src/simulation/systems/steering.ts`    | Calculates desired velocity based on AI targets and flocking vectors.           |
-| `src/simulation/systems/movement.ts`    | Integrates velocity into position and enforces terrain/world boundaries.       |
-| `src/simulation/systems/combat.ts`      | Processes projectiles, damage application, and radial aura conversions.         |
-| `src/simulation/systems/gathering.ts`   | Handles resource harvesting, inventory delivery, and construction progress.     |
-| `src/simulation/systems/lifecycle.ts`   | Manages biological decay, starvation, and death cleanup/loot spawning.          |
-| `src/simulation/systems/master.ts`      | Coordinates group-level reproduction, VM bytecode rules, and diplomacy.         |
-| `src/simulationWorker.ts`               | Orchestrates the sequential execution of ECS systems across workers.            |
-| `src/main.tsx`                          | Obtains WebGL2 context, spawns workers, and compiles shaders.                   |
-| `src/App.tsx`                           | Provides user interfaces for rules compilation and group creation.              |
+| Path                                    | Primary Architectural Responsibility                                        |
+| :-------------------------------------- | :-------------------------------------------------------------------------- |
+| `src/simulation/constants.ts`           | Simulation limits, OpCode numbers, time constants, and enum states.         |
+| `src/simulation/state.ts`               | Declares and maps all SharedArrayBuffer typed array buffers.                |
+| `src/simulation/initialization.ts`      | World generation, river curves, and default item definitions.               |
+| `src/simulation/utils.ts`               | Thread synchronization barriers, spatial queries, and group management.     |
+| `src/simulation/buffs.ts`               | Sparse buff management, item traits, and effective stats recalculation.     |
+| `src/simulation/systems/spatialHash.ts` | Rebuilds the linked-list grid for fast $O(1)$ spatial queries.              |
+| `src/simulation/systems/steering.ts`    | Calculates desired velocity based on AI targets and flocking vectors.       |
+| `src/simulation/systems/movement.ts`    | Integrates velocity into position and enforces terrain/world boundaries.    |
+| `src/simulation/systems/combat.ts`      | Processes projectiles, damage application, and radial aura conversions.     |
+| `src/simulation/systems/gathering.ts`   | Handles resource harvesting, inventory delivery, and construction progress. |
+| `src/simulation/systems/lifecycle.ts`   | Manages biological decay, starvation, and death cleanup/loot spawning.      |
+| `src/simulation/systems/master.ts`      | Coordinates group-level reproduction, VM bytecode rules, and diplomacy.     |
+| `src/simulationWorker.ts`               | Orchestrates the sequential execution of ECS systems across workers.        |
+| `src/main.tsx`                          | Obtains WebGL2 context, spawns workers, and compiles shaders.               |
+| `src/App.tsx`                           | Provides user interfaces for rules compilation and group creation.          |
 
 _Last updated: 2026-05-18_

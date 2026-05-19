@@ -6,21 +6,32 @@
     <title>POLMAP SIMULATOR</title>
 
     <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
 
     <!-- Icons -->
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+      rel="stylesheet"
+    />
 
     <link rel="stylesheet" href="/src/styles.css" />
     <script type="module" src="/src/main.tsx" defer></script>
   </head>
-  <body class="bg-background text-on-surface font-body h-screen w-screen overflow-hidden flex flex-col relative antialiased">
+  <body
+    class="bg-background text-on-surface font-body h-screen w-screen overflow-hidden flex flex-col relative antialiased"
+  >
     <!-- Main Area: Map (WebGL Canvas) -->
     <!-- This is rendered in the background, React will provide the overlay -->
     <main class="fixed inset-0 z-0 bg-black">
-      <canvas id="simCanvas" class="w-full h-full object-contain image-rendering-pixelated"></canvas>
+      <canvas
+        id="simCanvas"
+        class="w-full h-full object-contain image-rendering-pixelated"
+      ></canvas>
     </main>
 
     <!-- React Root: Full screen overlay for UI -->
@@ -28,7 +39,7 @@
 
     <!-- Legacy hidden elements for main.tsx compatibility if needed -->
     <!-- We'll gradually move these to React state -->
-    <div style="display: none;">
+    <div style="display: none">
       <div id="gameTimeDisplay"></div>
       <button id="btn-territory-toggle"></button>
       <button id="btn-speed-1"></button>

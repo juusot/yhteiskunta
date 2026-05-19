@@ -1,11 +1,15 @@
-import * as C from '../constants';
-import * as S from '../state';
+import * as C from "../constants";
+import * as S from "../state";
 
 /**
  * Rebuilds the singly-linked list spatial hash grid for entities, buildings, vehicles, and items.
  * Uses atomic exchange for thread-safe insertion across workers.
  */
-export function rebuildSpatialHash(state: SharedArrayBuffer, startIndex: number, endIndex: number): void {
+export function rebuildSpatialHash(
+  state: SharedArrayBuffer,
+  startIndex: number,
+  endIndex: number,
+): void {
   // Only the first worker clears the shared head pointers
   if (startIndex === 0) {
     S.spatialHead.fill(-1);
@@ -23,7 +27,7 @@ export function rebuildSpatialHash(state: SharedArrayBuffer, startIndex: number,
 
     const tx = Math.floor(S.positionX[i] / C.GRID_SIZE);
     const ty = Math.floor(S.positionY[i] / C.GRID_SIZE);
-    
+
     if (tx >= 0 && tx < C.GRID_COLS && ty >= 0 && ty < C.GRID_ROWS) {
       const cellIdx = ty * C.GRID_COLS + tx;
       if (cellIdx >= 0 && cellIdx < S.spatialHead.length) {
@@ -65,8 +69,12 @@ export function rebuildSpatialHash(state: SharedArrayBuffer, startIndex: number,
   }
 
   // Parallelize Item spatial hash - proportional range
-  const itemStart = Math.floor((startIndex / C.MAX_ENTITIES) * C.MAX_ITEM_INSTANCES);
-  const itemEnd = Math.floor((endIndex / C.MAX_ENTITIES) * C.MAX_ITEM_INSTANCES);
+  const itemStart = Math.floor(
+    (startIndex / C.MAX_ENTITIES) * C.MAX_ITEM_INSTANCES,
+  );
+  const itemEnd = Math.floor(
+    (endIndex / C.MAX_ENTITIES) * C.MAX_ITEM_INSTANCES,
+  );
   for (let i = itemStart; i < itemEnd; i++) {
     if (S.itemInstanceOwnerType[i] !== C.OWNER_TYPE_GROUND) continue;
 
