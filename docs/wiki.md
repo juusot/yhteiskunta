@@ -22,20 +22,21 @@
 
 ### **Multi-Threaded Memory Model**
 
-The entire simulation state is mapped to a unified `SharedArrayBuffer` block split into contiguous, index-matched typed arrays. This design allows four concurrent Web Workers to execute simulation logic in parallel across partitioned quadrants of the map grid without thread context-switching overhead or dynamic JavaScript heap allocations.
+The entire simulation state is mapped to a unified `SharedArrayBuffer` block split into contiguous, index-matched typed arrays. This design allows four concurrent Web Workers to execute simulation logic in parallel across linear slices of the entity arrays, maximizing CPU cache efficiency and minimizing thread synchronization overhead.
 
-- **Quadrant Partitioning**:
-  - **Quadrant 0 (Top-Left)**: World coordinates $X \in [0, 800)$, $Y \in [0, 600)$
-  - **Quadrant 1 (Top-Right)**: World coordinates $X \in [800, 1600)$, $Y \in [0, 600)$
-  - **Quadrant 2 (Bottom-Left)**: World coordinates $X \in [0, 800)$, $Y \in [600, 1200)$
-  - **Quadrant 3 (Bottom-Right)**: World coordinates $X \in [800, 1600)$, $Y \in [600, 1200)$
+- **Index-Based Partitioning**:
+  Each worker processes a contiguous range of entity indices (e.g., Worker 0 handles indices 0-24,999). This replaces spatial partitioning to eliminate edge-case migration logic and simplify cross-worker atomic operations on global structures like the spatial hash.
+
+- **Entity Component System (ECS) Execution**:
+  Entity behavior is processed by isolated, sequential systems that iterate over flat arrays in the `SharedArrayBuffer`. Each system is responsible for a specific data transformation (e.g., `steering.ts` only modifies velocity vectors), allowing for clean logical separation and high performance.
 
 - **Barriers & Synchronization**:  
   A thread-safe barrier primitive (`Atomics.wait()` / `Atomics.notify()`) forces all workers to sync at key logical boundaries during each simulation frame:
-  - **Phase 0**: Spatial hashing and intelligence data exchange
-  - **Phase 1**: Throttled systems execution (Master worker only)
-  - **Phase 2**: Autonomy AI evaluations and physical steering calculations
-  - **Phase 3**: Positional and kinematic vector integrations
+  - **Barrier 0**: Start of tick alignment.
+  - **Barrier 1**: Clear global stats (Worker 0 only) before systems run.
+  - **Barrier 2**: Ensure all workers finished parallel ECS tasks.
+  - **Barrier 3**: Master worker finished global orchestration (Reproduction, VM rules).
+  - **Barrier 4**: Final tick increment and release.
 
 ## **World & Biome Generation**
 
@@ -310,18 +311,22 @@ To prevent CPU bottlenecking, the main thread streams raw arrays directly to the
 
 ### **File Reference Table**
 
-| Path                                 | Primary Architectural Responsibility                                            |
-| :----------------------------------- | :------------------------------------------------------------------------------ |
-| `src/simulation/constants.ts`        | Simulation limits, OpCode numbers, time constants, and enum states.             |
-| `src/simulation/state.ts`            | Declares and maps all SharedArrayBuffer typed array buffers.                    |
-| `src/simulation/initialization.ts`   | World generation, river curves, and default item definitions.                   |
-| `src/simulation/utils.ts`            | Thread synchronization barriers, spatial queries, and group management.         |
-| `src/simulation/buffs.ts`            | Sparse buff management, item traits, and effective stats recalculation.         |
-| `src/simulation/templates.ts`        | Script-compilation templates for national, military, and spy factions.          |
-| `src/simulation/systems/master.ts`   | Runs aggregate demographics, VM bytecode rules, and territorial influence maps. |
-| `src/simulation/systems/parallel.ts` | Runs quadrant life ticks, steering vectors, projectile math, and movement.      |
-| `src/simulationWorker.ts`            | Coordinates the synchronous loop execution pipeline across threads.             |
-| `src/main.tsx`                       | Obtains WebGL2 context, spawns workers, and compiles shaders.                   |
-| `src/App.tsx`                        | Provides user interfaces for rules compilation and group creation.              |
+| Path                                    | Primary Architectural Responsibility                                            |
+| :-------------------------------------- | :------------------------------------------------------------------------------ |
+| `src/simulation/constants.ts`           | Simulation limits, OpCode numbers, time constants, and enum states.             |
+| `src/simulation/state.ts`               | Declares and maps all SharedArrayBuffer typed array buffers.                    |
+| `src/simulation/initialization.ts`      | World generation, river curves, and default item definitions.                   |
+| `src/simulation/utils.ts`               | Thread synchronization barriers, spatial queries, and group management.         |
+| `src/simulation/buffs.ts`               | Sparse buff management, item traits, and effective stats recalculation.         |
+| `src/simulation/systems/spatialHash.ts` | Rebuilds the linked-list grid for fast $O(1)$ spatial queries.                 |
+| `src/simulation/systems/steering.ts`    | Calculates desired velocity based on AI targets and flocking vectors.           |
+| `src/simulation/systems/movement.ts`    | Integrates velocity into position and enforces terrain/world boundaries.       |
+| `src/simulation/systems/combat.ts`      | Processes projectiles, damage application, and radial aura conversions.         |
+| `src/simulation/systems/gathering.ts`   | Handles resource harvesting, inventory delivery, and construction progress.     |
+| `src/simulation/systems/lifecycle.ts`   | Manages biological decay, starvation, and death cleanup/loot spawning.          |
+| `src/simulation/systems/master.ts`      | Coordinates group-level reproduction, VM bytecode rules, and diplomacy.         |
+| `src/simulationWorker.ts`               | Orchestrates the sequential execution of ECS systems across workers.            |
+| `src/main.tsx`                          | Obtains WebGL2 context, spawns workers, and compiles shaders.                   |
+| `src/App.tsx`                           | Provides user interfaces for rules compilation and group creation.              |
 
 _Last updated: 2026-05-18_

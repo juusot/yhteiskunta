@@ -7,86 +7,26 @@ import * as B from '../buffs';
 export function SummarySystem(): void {
   if (S.tickCount % 60 !== 0) return;
 
-  S.groupPopulationCount.fill(0);
-  S.groupBuildingCount.fill(0);
-  S.groupTotalWealth.fill(0);
-  S.groupWood.fill(0);
-  S.groupGold.fill(0);
-  S.groupFood.fill(0);
-  S.groupMisc.fill(0);
   let totalActive = 0;
-  
-  S.groupHouseCapacity.fill(0);
-  S.groupWarehouseX.fill(0);
-  S.groupWarehouseY.fill(0);
+  for (let g = 0; g < C.MAX_GROUPS; g++) {
+    totalActive += S.groupPopulationCount[g];
+  }
 
   // Phase 23: National Cohesion System
-  // Update cohesion for all active groups
   for (let g = 0; g < C.MAX_GROUPS; g++) {
     const pop = S.groupPopulationCount[g];
     if (pop === 0) continue;
     
     const wealth = S.groupTotalWealth[g];
     
-    // Wealth-based cohesion changes
     if (wealth > C.COHESION_WEALTHY_THRESHOLD) {
-      // Prosperity increases cohesion
       S.groupCohesion[g] = Math.min(C.COHESION_MAX, S.groupCohesion[g] + C.COHESION_GROWTH_RATE);
     } else if (wealth <= 0) {
-      // Collapse decreases cohesion rapidly
       S.groupCohesion[g] = Math.max(0, S.groupCohesion[g] - C.COHESION_DECAY_RATE);
     }
     
-    // ANARCHY TRIGGER: If cohesion falls below threshold, restructure the group hierarchy
     if (S.groupCohesion[g] < C.COHESION_ANARCHY_THRESHOLD && S.tickCount % C.TICKS_PER_DAY === 0) {
       triggerAnarchy(g);
-    }
-  }
-
-  // Count population - use 10 slots per entity (0-7 public, 8-9 secret)
-  for (let i = 0; i < C.MAX_ENTITIES; i++) {
-    if (S.state[i] !== C.EntityState.Dead) {
-      // Count only public slots (0-7) for demographics
-      const baseIdx = i * C.MAX_GROUP_CHANNELS;
-      let primaryGid = -1;
-      for (let s = 0; s < C.PUBLIC_GROUP_SLOTS; s++) {
-        const gid = S.groupAffiliations[baseIdx + s];
-        if (gid >= 0 && gid < C.MAX_GROUPS) {
-          S.groupPopulationCount[gid]++;
-          if (primaryGid === -1) primaryGid = gid;
-        }
-      }
-      if (primaryGid !== -1) {
-        S.groupTotalWealth[primaryGid] += S.money[i];
-        S.groupGold[primaryGid] += S.money[i];
-        totalActive++;
-      }
-    }
-  }
-
-
-  // Add building inventories to wealth and update building counts
-  for (let b = 0; b < C.MAX_BUILDINGS; b++) {
-    if (S.bldHealth[b] > 0 && S.bldType[b] !== 0) {
-      const gid = S.bldOwnerGroup[b];
-      if (gid >= 0 && gid < C.MAX_GROUPS) {
-        S.groupBuildingCount[gid]++;
-        if (S.bldType[b] === C.BuildingType.Warehouse) {
-          // Update group warehouse location to the first functional warehouse found
-          if (S.groupWarehouseX[gid] === 0) {
-            S.groupWarehouseX[gid] = S.bldPositionX[b];
-            S.groupWarehouseY[gid] = S.bldPositionY[b];
-          }
-          
-          S.groupTotalWealth[gid] += S.bldDataA[b] + S.bldDataB[b] + S.bldDataC[b];
-          S.groupWood[gid] += S.bldDataA[b];
-          S.groupGold[gid] += S.bldDataB[b];
-          S.groupFood[gid] += S.bldDataC[b];
-          S.groupHouseCapacity[gid] += 20; // Base warehouse capacity
-        } else if (S.bldType[b] === C.BuildingType.House) {
-          S.groupHouseCapacity[gid] += S.bldDataB[b];
-        }
-      }
     }
   }
 
@@ -96,10 +36,11 @@ export function SummarySystem(): void {
     const pop = S.groupPopulationCount[g];
     if (pop === 0) continue;
     
-    // Only consume food if group has food reserves
-    if (S.groupFood[g] <= 0) continue;
+    if (S.groupFood[g] <= 0) {
+       S.starvingGroups[g] = 1;
+       continue;
+    }
     
-    // 0.1 food per person per cycle
     const foodRequired = Math.max(1, Math.floor(pop * 0.1));
     if (S.groupFood[g] >= foodRequired) {
       S.groupFood[g] -= foodRequired;
@@ -114,16 +55,11 @@ export function SummarySystem(): void {
   for (let g = 0; g < C.MAX_GROUPS; g++) {
     const pop = S.groupPopulationCount[g];
     const wealth = S.groupTotalWealth[g];
-    const bldCount = S.groupBuildingCount[g];
     
-    // Safety net for the 4 primary nations
     const needsSafetySpawn = g < 4 && pop < 20;
-    
-    // House capacity calculated from polymorphic registers
     const houseCapacity = Math.max(20, S.groupHouseCapacity[g]);
-
-    // Only allow reproduction if the group has capacity and wealth
     const canAffordReproduction = pop > 0 && pop < houseCapacity && wealth > 1000;    
+
     if (needsSafetySpawn || canAffordReproduction) {
       let births = 0;
       const maxBirths = needsSafetySpawn ? 5 : 2;
@@ -140,9 +76,7 @@ export function SummarySystem(): void {
         S.positionY[i] = S.groupWarehouseY[g] + (Math.random() - 0.5) * 50;
         S.velocityX[i] = (Math.random() - 0.5);
         S.velocityY[i] = (Math.random() - 0.5);
-        // Phase 23: Assign to public slot 0
         S.groupAffiliations[i * C.MAX_GROUP_CHANNELS + 0] = g;
-        // Clear remaining slots
         for (let s = 1; s < C.MAX_GROUP_CHANNELS; s++) {
           S.groupAffiliations[i * C.MAX_GROUP_CHANNELS + s] = -1;
         }
@@ -159,54 +93,6 @@ export function SummarySystem(): void {
         if (!needsSafetySpawn) S.groupTotalWealth[g] -= costPerBirth;
         births++;
         deadPtr++;
-      }
-    }
-  }
-
-  // Starvation damage pass
-  for (let i = 0; i < C.MAX_ENTITIES; i++) {
-    if (S.state[i] === C.EntityState.Dead) continue;
-    const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS + 0]; // Check slot 0
-    if (gid >= 0 && gid < C.MAX_GROUPS && S.starvingGroups[gid] === 1) {
-      S.health[i] -= 10; // Fast death if group is broke
-    }
-  }
-
-  // Mana Regeneration
-  for (let i = 0; i < C.MAX_ENTITIES; i++) {
-    if ((S.traitBitmask[i] & C.TRAIT_MAGIC) !== 0) {
-      S.mana[i] = Math.min(100, S.mana[i] + 5);
-    }
-  }
-
-  // Resource Regeneration
-  for (let i = 0; i < C.MAX_ENTITIES; i++) {
-    if (S.state[i] === C.EntityState.Dead) {
-      const traits = S.traitBitmask[i];
-      if ((traits & (C.TRAIT_TREE | C.TRAIT_GOLD | C.TRAIT_BUSH)) !== 0) {
-        // Regeneration chance
-        if (Math.random() > 0.95) {
-          let x = Math.random() * C.WORLD_WIDTH;
-          let y = Math.random() * C.WORLD_HEIGHT;
-          const tx = Math.floor(x / C.TILE_SIZE);
-          const ty = Math.floor(y / C.TILE_SIZE);
-          const tileIdx = Math.min(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS - 1, Math.max(0, ty * C.WORLD_MAP_COLS + tx));
-          const terrain = S.worldMap[tileIdx];
-
-          let valid = false;
-          if ((traits & C.TRAIT_GOLD) !== 0 && terrain === C.TerrainType.Water) valid = true;
-          else if ((traits & C.TRAIT_TREE) !== 0 && terrain === C.TerrainType.Forest) valid = true;
-          else if ((traits & C.TRAIT_BUSH) !== 0 && terrain === C.TerrainType.Grass) valid = true;
-
-          if (valid) {
-            S.positionX[i] = x; S.positionY[i] = y;
-            S.velocityX[i] = 0; S.velocityY[i] = 0;
-            S.targetEntityId[i] = -1;
-            S.targetBuildingId[i] = -1;
-            S.health[i] = 100;
-            S.state[i] = C.EntityState.Idle;
-          }
-        }
       }
     }
   }

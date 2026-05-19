@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { BrutalButton, BrutalWindow, BrutalTab, BrutalTable } from './components/BrutalUI';
 
 interface GroupStats {
   id: number;
@@ -46,6 +47,7 @@ interface BuildingInfo {
 }
 
 interface AppProps {
+  uiWorker: Worker;
   ruleRegistry: Int32Array | null;
   logicBytecode: Int32Array | null;
   groupPopulation: Int32Array | null;
@@ -69,11 +71,12 @@ const BUILDING_NAMES = ['', 'Warehouse', 'House', 'Tower', 'Wall', 'Field'];
 const ARCHETYPE_COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#eab308'];
 
 export const App: React.FC<AppProps> = ({ 
-  ruleRegistry, logicBytecode, groupPopulation, groupTotalWealth, groupBuildingCount,
+  uiWorker, ruleRegistry, logicBytecode, groupPopulation, groupTotalWealth, groupBuildingCount,
   groupWood, groupGold, groupFood, groupMisc,
   tickCount, lastTickTime, avgTickTime, inspectEntity, chronicle,
   onFollow, onClearInspect
 }) => {
+  const [isWindowOpen, setIsWindowOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'groups' | 'characters' | 'buildings' | 'rules'>('groups');
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
   const [selectedEntityId, setSelectedEntityId] = useState<number | null>(null);
@@ -85,10 +88,47 @@ export const App: React.FC<AppProps> = ({
   const [brushTrait, setBrushTrait] = useState(0);
   const [newGroupName, setNewGroupName] = useState('');
   const [selectedArchetype, setSelectedArchetype] = useState(1);
+  const [tpsSpeed, setTpsSpeed] = useState(60);
+  const [isPaused, setIsPaused] = useState(false);
+
+  const [visibleEntities, setVisibleEntities] = useState<any[]>([]);
 
   useEffect(() => {
     (window as any).brushState = { active: brushActive, groupId: brushGroupId, trait: brushTrait };
   }, [brushActive, brushGroupId, brushTrait]);
+
+  useEffect(() => {
+    document.body.dataset.uiOpen = isWindowOpen ? 'true' : 'false';
+  }, [isWindowOpen]);
+
+  // UI Worker Communication
+  useEffect(() => {
+    const handleMessage = (e: MessageEvent) => {
+      if (e.data.type === "ENTITIES_PAYLOAD") {
+        setVisibleEntities(e.data.data);
+      }
+    };
+    uiWorker.addEventListener('message', handleMessage);
+    return () => uiWorker.removeEventListener('message', handleMessage);
+  }, [uiWorker]);
+
+  // Throttled Polling for Entity Data
+  useEffect(() => {
+    const interval = setInterval(() => {
+      uiWorker.postMessage({ 
+        type: "FETCH_ENTITIES", 
+        payload: { offset: 0, limit: 50 } 
+      });
+    }, 250);
+    return () => clearInterval(interval);
+  }, [uiWorker]);
+
+  // Sync selection state with inspectEntity (without auto-opening window)
+  useEffect(() => {
+    if (inspectEntity) {
+      setSelectedEntityId(inspectEntity.id);
+    }
+  }, [inspectEntity]);
 
   const groups = useMemo(() => {
     const result: GroupStats[] = [];
@@ -113,87 +153,48 @@ export const App: React.FC<AppProps> = ({
     return result;
   }, [tickCount, groupPopulation, groupTotalWealth, groupBuildingCount, groupWood, groupGold, groupFood, groupMisc]);
 
-  const selectedGroup = useMemo(() => {
-    if (selectedGroupId === null) return null;
-    return groups.find(g => g.id === selectedGroupId) || null;
-  }, [selectedGroupId, groups]);
-
   const filteredGroups = useMemo(() => {
     if (!searchTerm) return groups;
     const term = searchTerm.toLowerCase();
     return groups.filter(g => g.name.toLowerCase().includes(term) || g.id.toString() === term);
   }, [groups, searchTerm]);
 
+  const selectedGroup = useMemo(() => {
+    if (selectedGroupId === null) return null;
+    return groups.find(g => g.id === selectedGroupId) || null;
+  }, [selectedGroupId, groups]);
+
   const groupMembers = useMemo(() => {
     if (!selectedGroup) return [];
-    const members: EntityInfo[] = [];
-    if ((window as any).S && (window as any).S.state) {
-      const S = (window as any).S;
-      const maxEntities = 100000;
-      for (let i = 0; i < maxEntities; i++) {
-        if (S.state[i] === 5) continue;
-        for (let slot = 0; slot < 8; slot++) {
-          if (S.groupAffiliations[i * 10 + slot] === selectedGroup.id) {
-            members.push({
-              id: i,
-              name: (window as any).entityNames?.[i] || `Entity ${i}`,
-              health: S.health[i] || 0,
-              maxHealth: 100,
-              money: S.money[i] || 0,
-              state: S.state[i] || 0,
-              stateName: STATE_NAMES[S.state[i]] || 'Unknown',
-              inventory: [],
-              tool: S.charTool?.[i] || 0,
-              weapon: S.charWeapon?.[i] || 0,
-              armor: S.charArmor?.[i] || 0,
-              positionX: S.positionX?.[i] || 0,
-              positionY: S.positionY?.[i] || 0,
-groups: Array.from(S.groupAffiliations.slice(i * 10, i * 10 + 10) as unknown as number[]).filter(g => g !== -1),
-              effectiveDamage: S.effectiveDamage?.[i] || 10,
-              effectiveSpeed: S.effectiveSpeed?.[i] || 1,
-              effectiveLifespan: S.effectiveLifespan?.[i] || 80
-            });
-            break;
-          }
-        }
-      }
-    }
-    return members;
-  }, [selectedGroup, tickCount]);
-
-  const entities = useMemo(() => {
-    const result: EntityInfo[] = [];
-    const S = (window as any).S;
-    if (!S?.state) return result;
-    const maxEntities = 100000;
-    for (let i = 0; i < maxEntities; i++) {
-      if (S.state[i] === 5) continue;
-        result.push({
-          id: i,
-          name: (window as any).entityNames?.[i] || `Entity ${i}`,
-          health: S.health[i] || 0,
-          maxHealth: 100,
-          money: S.money[i] || 0,
-          state: S.state[i] || 0,
-          stateName: STATE_NAMES[S.state[i]] || 'Unknown',
-          inventory: [],
-          tool: S.charTool?.[i] || 0,
-          weapon: S.charWeapon?.[i] || 0,
-          armor: S.charArmor?.[i] || 0,
-          positionX: S.positionX?.[i] || 0,
-          positionY: S.positionY?.[i] || 0,
-groups: Array.from(S.groupAffiliations.slice(i * 10, i * 10 + 10) as unknown as number[]).filter(g => g !== -1),
-            effectiveDamage: S.effectiveDamage?.[i] || 10,
-          effectiveSpeed: S.effectiveSpeed?.[i] || 1,
-          effectiveLifespan: S.effectiveLifespan?.[i] || 80
-        });
-        if (result.length >= 500) break;
-      }
-    return result;
-  }, [tickCount]);
+    return visibleEntities
+      .filter(e => e.faction === selectedGroup.id)
+      .map(e => ({
+        ...e,
+        name: `Entity ${e.id}`,
+        stateName: STATE_NAMES[e.state] || 'Unknown',
+        maxHealth: 100,
+        money: 0,
+        inventory: [],
+        tool: 0,
+        weapon: 0,
+        armor: 0,
+        positionX: e.x,
+        positionY: e.y,
+        groups: [e.faction].filter(g => g !== -1),
+        effectiveDamage: 10,
+        effectiveSpeed: 1,
+        effectiveLifespan: 80
+      } as EntityInfo));
+  }, [selectedGroup, visibleEntities]);
 
   const filteredEntities = useMemo(() => {
-    let result = entities;
+    let result = visibleEntities.map(e => ({
+      ...e,
+      name: `Entity ${e.id}`,
+      stateName: STATE_NAMES[e.state] || 'Unknown',
+      groups: [e.faction].filter(g => g !== -1)
+    }));
+
     if (filterState !== -1) {
       result = result.filter(e => e.state === filterState);
     }
@@ -202,12 +203,32 @@ groups: Array.from(S.groupAffiliations.slice(i * 10, i * 10 + 10) as unknown as 
       result = result.filter(e => e.id.toString() === term || e.groups.some(g => g.toString() === term));
     }
     return result;
-  }, [entities, filterState, searchTerm]);
+  }, [visibleEntities, filterState, searchTerm]);
 
   const selectedEntity = useMemo(() => {
     if (selectedEntityId === null) return inspectEntity;
-    return entities.find(e => e.id === selectedEntityId) || inspectEntity;
-  }, [selectedEntityId, inspectEntity, entities]);
+    const found = visibleEntities.find(e => e.id === selectedEntityId);
+    if (found) {
+        return {
+            ...found,
+            name: `Entity ${found.id}`,
+            stateName: STATE_NAMES[found.state] || 'Unknown',
+            maxHealth: 100,
+            money: 0,
+            inventory: [],
+            tool: 0,
+            weapon: 0,
+            armor: 0,
+            positionX: found.x,
+            positionY: found.y,
+            groups: [found.faction].filter(g => g !== -1),
+            effectiveDamage: 10,
+            effectiveSpeed: 1,
+            effectiveLifespan: 80
+        } as EntityInfo;
+    }
+    return inspectEntity;
+  }, [selectedEntityId, inspectEntity, visibleEntities]);
 
   const buildings = useMemo(() => {
     const result: BuildingInfo[] = [];
@@ -246,625 +267,368 @@ groups: Array.from(S.groupAffiliations.slice(i * 10, i * 10 + 10) as unknown as 
     return buildings.find(b => b.id === selectedBuildingId) || null;
   }, [selectedBuildingId, buildings]);
 
-  const handleEntityClick = (id: number) => {
-    setSelectedEntityId(id);
-    (window as any).selectEntity?.(id);
+  const handleSpeedClick = (speed: number, id: string) => {
+    setTpsSpeed(speed);
+    document.getElementById(id)?.click();
   };
 
-  const handleGroupClick = (id: number) => {
-    setSelectedGroupId(id);
+  const handlePauseToggle = () => {
+    setIsPaused(!isPaused);
+    document.getElementById('btn-toggle-loop')?.click();
   };
 
-  const handleBuildingClick = (id: number) => {
-    setSelectedBuildingId(id);
-  };
+  const gameDay = Math.floor(tickCount / 3600) % 30 + 1;
+  const gameMonth = Math.floor(tickCount / (3600 * 30)) % 12 + 1;
+  const gameYear = Math.floor(tickCount / (3600 * 30 * 12)) + 1;
+
+  const totalPop = groups.reduce((a, g) => a + g.population, 0);
 
   return (
-    <div className="h-full flex flex-col bg-gray-50 text-gray-900 font-sans text-sm">
-      <div className="flex border-b border-gray-300 bg-white">
-        {(['groups', 'characters', 'buildings', 'rules'] as const).map(tab => (
-          <button 
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 font-medium text-xs uppercase tracking-wide transition-colors ${
-              activeTab === tab 
-                ? 'bg-gray-900 text-white border-b-2 border-gray-900' 
-                : 'bg-white text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
-
-      {/* Monitor Section - Always Visible */}
-      <div className="border-b border-gray-300 bg-gray-100 p-2 space-y-2">
-        <div className="flex items-center justify-between text-xs">
-          <div className="flex gap-3">
-            <span><span className="text-gray-500">Pop:</span> <span className="font-medium">{groups.reduce((a,g) => a + g.population, 0).toLocaleString()}</span></span>
-            <span><span className="text-gray-500">Tick:</span> <span className="font-medium">{tickCount}</span></span>
-            <span><span className="text-gray-500">Last:</span> <span className="font-medium">{lastTickTime.toFixed(1)}ms</span></span>
-            <span><span className="text-gray-500">Avg:</span> <span className="font-medium">{avgTickTime.toFixed(1)}ms</span></span>
+    <div className="fixed inset-0 flex flex-col pointer-events-none">
+      {/* TopAppBar */}
+      <header className="bg-surface-container-lowest text-on-surface flex justify-between items-center w-full px-margin-lg py-unit h-16 border-b-4 border-on-surface shadow-brutal z-50 pointer-events-auto">
+        <div className="flex items-center gap-4">
+          <div className="border-2 border-on-surface px-4 py-2 bg-surface font-mono text-[13px] font-bold">
+            Day {gameDay}, Month {gameMonth}, Year {gameYear}
+          </div>
+          <div className="bg-secondary-container text-on-secondary-container px-4 py-1 border-2 border-on-surface font-headline text-[24px] font-bold shadow-brutal-sm">
+            POLMAP
           </div>
         </div>
-        
-        {inspectEntity && (
-          <div className="bg-white rounded border border-gray-300 p-2 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="font-medium text-xs">Inspect: Entity {inspectEntity.id}</span>
-              <span className="text-xs text-gray-500">{inspectEntity.stateName}</span>
-              <span className="text-xs">HP: {inspectEntity.health}</span>
-            </div>
-            <div className="flex gap-1">
-              <button onClick={onFollow} className="px-2 py-0.5 bg-blue-500 text-white text-xs rounded">Follow</button>
-              <button onClick={onClearInspect} className="px-2 py-0.5 bg-gray-400 text-white text-xs rounded">Clear</button>
-            </div>
+        <div className="flex items-center gap-4">
+          <div className="flex gap-2">
+            <BrutalButton onClick={() => handleSpeedClick(60, 'btn-speed-1')} active={tpsSpeed === 60}>1X</BrutalButton>
+            <BrutalButton onClick={() => handleSpeedClick(120, 'btn-speed-2')} active={tpsSpeed === 120}>2X</BrutalButton>
+            <BrutalButton onClick={() => handleSpeedClick(240, 'btn-speed-4')} active={tpsSpeed === 240}>4X</BrutalButton>
+            <BrutalButton onClick={() => handleSpeedClick(480, 'btn-speed-8')} active={tpsSpeed === 480}>8X</BrutalButton>
+            <BrutalButton onClick={() => handleSpeedClick(0, 'btn-speed-max')} active={tpsSpeed === 0}>MAX</BrutalButton>
           </div>
-        )}
-
-        <div className="bg-white rounded border border-gray-300 p-2 max-h-24 overflow-y-auto">
-          <div className="text-xs font-medium text-gray-600 mb-1">Chronicle</div>
-          {chronicle.length > 0 ? (
-            chronicle.slice(-10).map((line, i) => (
-              <div key={i} className="text-[10px] text-gray-700 border-b border-gray-100 last:border-0">{line}</div>
-            ))
-          ) : (
-            <div className="text-[10px] text-gray-400 italic">No events</div>
-          )}
-        </div>
-      </div>
-
-      <div className="flex-1 flex overflow-hidden">
-        {activeTab === 'groups' && (
-          <>
-            <div className="w-1/3 border-r border-gray-300 flex flex-col bg-white">
-              <div className="p-3 border-b border-gray-200">
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Search groups..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:border-gray-500"
-                />
-              </div>
-              <div className="p-2 border-b border-gray-200 bg-gray-50">
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => {
-                      if (newGroupName.trim() && (window as any).createGroup) {
-                        (window as any).createGroup(newGroupName.trim(), selectedArchetype);
-                        setNewGroupName('');
-                      }
-                    }}
-                    className="px-3 py-1 bg-gray-900 text-white text-xs font-medium rounded hover:bg-gray-700"
-                  >
-                    + Create Group
-                  </button>
-                  <input
-                    type="text"
-                    value={newGroupName}
-                    onChange={(e) => setNewGroupName(e.target.value)}
-                    placeholder="Group name..."
-                    className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs"
-                  />
-                  <select
-                    value={selectedArchetype}
-                    onChange={(e) => setSelectedArchetype(parseInt(e.target.value))}
-                    className="px-2 py-1 border border-gray-300 rounded text-xs"
-                  >
-                    <option value={0}>None</option>
-                    <option value={1}>Nation</option>
-                    <option value={2}>Army</option>
-                    <option value={3}>Spy Ring</option>
-                    <option value={4}>Cult</option>
-                  </select>
-                </div>
-              </div>
-              <div className="flex-1 overflow-y-auto">
-                {filteredGroups.map(g => (
-                  <div
-                    key={g.id}
-                    onClick={() => handleGroupClick(g.id)}
-                    className={`p-3 border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${
-                      selectedGroupId === g.id ? 'bg-gray-100 border-l-4 border-l-gray-900' : ''
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div 
-                          className="w-3 h-3 rounded-full" 
-                          style={{ backgroundColor: ARCHETYPE_COLORS[g.id % 4] }}
-                        />
-                        <span className="font-medium">{g.name}</span>
-                        <span className="text-gray-400 text-xs">ID: {g.id}</span>
-                      </div>
-                      <span className="text-xs text-gray-500">{g.population} pop</span>
-                    </div>
-                    <div className="mt-1 text-xs text-gray-500">
-                      Wealth: {g.wealth.toLocaleString()} · {g.buildingCount} buildings
-                    </div>
-                  </div>
-                ))}
-                {filteredGroups.length === 0 && (
-                  <div className="p-4 text-center text-gray-400 text-sm">No groups found</div>
-                )}
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4">
-              {selectedGroup ? (
-                <div className="space-y-4">
-                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-                    <div className="flex items-center gap-3 mb-3">
-                      <div 
-                        className="w-8 h-8 rounded-full" 
-                        style={{ backgroundColor: ARCHETYPE_COLORS[selectedGroup.id % 4] }}
-                      />
-                      <div>
-                        <h2 className="text-lg font-semibold">{selectedGroup.name}</h2>
-                        <p className="text-xs text-gray-500">Group ID: {selectedGroup.id}</p>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div><span className="text-gray-500">Population:</span> {selectedGroup.population}</div>
-                      <div><span className="text-gray-500">Buildings:</span> {selectedGroup.buildingCount}</div>
-                      <div><span className="text-gray-500">Wealth:</span> {selectedGroup.wealth.toLocaleString()}</div>
-                    </div>
-                  </div>
-
-                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-                    <h3 className="font-medium text-gray-700 mb-3">Resources</h3>
-                    <div className="grid grid-cols-4 gap-3">
-                      <div className="text-center p-2 bg-amber-50 rounded">
-                        <div className="text-lg font-semibold text-amber-700">{selectedGroup.wood}</div>
-                        <div className="text-xs text-amber-600">Wood</div>
-                      </div>
-                      <div className="text-center p-2 bg-yellow-50 rounded">
-                        <div className="text-lg font-semibold text-yellow-700">{selectedGroup.gold}</div>
-                        <div className="text-xs text-yellow-600">Gold</div>
-                      </div>
-                      <div className="text-center p-2 bg-green-50 rounded">
-                        <div className="text-lg font-semibold text-green-700">{selectedGroup.food}</div>
-                        <div className="text-xs text-green-600">Food</div>
-                      </div>
-                      <div className="text-center p-2 bg-gray-50 rounded">
-                        <div className="text-lg font-semibold text-gray-700">{selectedGroup.misc}</div>
-                        <div className="text-xs text-gray-500">Misc</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-                    <h3 className="font-medium text-gray-700 mb-3">
-                      Members ({groupMembers.length})
-                    </h3>
-                    <div className="max-h-64 overflow-y-auto">
-                      {groupMembers.slice(0, 50).map(m => (
-                        <div
-                          key={m.id}
-                          onClick={() => {
-                            setActiveTab('characters');
-                            setSelectedEntityId(m.id);
-                          }}
-                          className="flex items-center justify-between p-2 hover:bg-gray-50 cursor-pointer rounded"
-                        >
-                          <div>
-                            <span className="font-medium">Entity {m.id}</span>
-                            <span className="text-xs text-gray-500 ml-2">{m.stateName}</span>
-                          </div>
-                          <div className="text-xs text-gray-400">
-                            HP: {m.health}
-                          </div>
-                        </div>
-                      ))}
-                      {groupMembers.length === 0 && (
-                        <div className="text-gray-400 text-sm text-center py-2">No members</div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-                    <h3 className="font-medium text-gray-700 mb-3">Actions</h3>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => {
-                          const eid = prompt('Entity ID:');
-                          const slot = prompt('Slot (0-7):');
-                          if (eid && slot && (window as any).assignToGroup) {
-                            (window as any).assignToGroup(parseInt(eid), selectedGroup.id, parseInt(slot));
-                          }
-                        }}
-                        className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
-                      >
-                        Assign Member
-                      </button>
-                      <button
-                        onClick={() => {
-                          const evt = prompt('Event (99=attack, 100=move, 101=recruit):');
-                          if (evt && (window as any).sendEvent) {
-                            (window as any).sendEvent(selectedGroup.id, parseInt(evt));
-                          }
-                        }}
-                        className="px-3 py-1.5 bg-orange-500 text-white text-xs rounded hover:bg-orange-600"
-                      >
-                        Send Event
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center justify-center h-full text-gray-400">
-                  Select a group to view details
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {activeTab === 'characters' && (
-          <>
-            <div className="w-1/3 border-r border-gray-300 flex flex-col bg-white">
-              <div className="p-3 border-b border-gray-200">
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Search by ID or group..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:border-gray-500"
-                />
-              </div>
-              <div className="p-2 border-b border-gray-200 bg-gray-50">
-                <select
-                  value={filterState}
-                  onChange={(e) => setFilterState(parseInt(e.target.value))}
-                  className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
-                >
-                  <option value={-1}>All States</option>
-                  {STATE_NAMES.map((name, i) => (
-                    <option key={i} value={i}>{name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex-1 overflow-y-auto">
-                {filteredEntities.map(e => (
-                  <div
-                    key={e.id}
-                    onClick={() => handleEntityClick(e.id)}
-                    className={`p-3 border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${
-                      selectedEntityId === e.id ? 'bg-gray-100 border-l-4 border-l-blue-500' : ''
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className="font-medium">Entity {e.id}</span>
-                        <span className={`ml-2 text-xs px-1.5 py-0.5 rounded ${
-                          e.state === 3 ? 'bg-red-100 text-red-700' :
-                          e.state === 1 ? 'bg-green-100 text-green-700' :
-                          e.state === 0 ? 'bg-gray-100 text-gray-600' :
-                          'bg-yellow-100 text-yellow-700'
-                        }`}>
-                          {e.stateName}
-                        </span>
-                      </div>
-                      <div className="text-xs text-gray-500">HP: {e.health}</div>
-                    </div>
-                    {e.groups.length > 0 && (
-                      <div className="mt-1 text-xs text-gray-400">
-                        Groups: {e.groups.join(', ')}
-                      </div>
-                    )}
-                  </div>
-                ))}
-                {filteredEntities.length === 0 && (
-                  <div className="p-4 text-center text-gray-400 text-sm">No entities found</div>
-                )}
-              </div>
-              <div className="p-2 border-t border-gray-200 text-xs text-gray-500 text-center">
-                Showing {filteredEntities.length} entities
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4">
-              {selectedEntity ? (
-                <div className="space-y-4">
-                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <h2 className="text-lg font-semibold">{selectedEntity.name}</h2>
-                      <span className="text-xs text-gray-400">ID: {selectedEntity.id}</span>
-                      <span className={`text-xs px-2 py-1 rounded ${
-                        selectedEntity.state === 3 ? 'bg-red-100 text-red-700' :
-                        selectedEntity.state === 1 ? 'bg-green-100 text-green-700' :
-                        selectedEntity.state === 0 ? 'bg-gray-100 text-gray-600' :
-                        'bg-yellow-100 text-yellow-700'
-                      }`}>
-                        {selectedEntity.stateName}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="text-gray-500">Position:</span>{' '}
-                        ({Math.round(selectedEntity.positionX)}, {Math.round(selectedEntity.positionY)})
-                      </div>
-                      <div>
-                        <span className="text-gray-500">Money:</span> {selectedEntity.money}
-                      </div>
-                    </div>
-                    <div className="mt-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-500 text-sm">Health:</span>
-                        <div className="flex-1 h-3 bg-gray-200 rounded-full overflow-hidden">
-                          <div 
-                            className="h-full bg-green-500 transition-all"
-                            style={{ width: `${(selectedEntity.health / selectedEntity.maxHealth) * 100}%` }}
-                          />
-                        </div>
-                        <span className="text-sm">{selectedEntity.health}/{selectedEntity.maxHealth}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-                    <h3 className="font-medium text-gray-700 mb-3">Stats</h3>
-                    <div className="grid grid-cols-3 gap-4 text-center">
-                      <div className="p-3 bg-gray-50 rounded">
-                        <div className="text-xl font-semibold">{selectedEntity.effectiveDamage}</div>
-                        <div className="text-xs text-gray-500">Damage</div>
-                      </div>
-                      <div className="p-3 bg-gray-50 rounded">
-                        <div className="text-xl font-semibold">{selectedEntity.effectiveSpeed.toFixed(2)}</div>
-                        <div className="text-xs text-gray-500">Speed</div>
-                      </div>
-                      <div className="p-3 bg-gray-50 rounded">
-                        <div className="text-xl font-semibold">{selectedEntity.effectiveLifespan}</div>
-                        <div className="text-xs text-gray-500">Lifespan</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-                    <h3 className="font-medium text-gray-700 mb-3">Equipment</h3>
-                    <div className="grid grid-cols-3 gap-4 text-sm">
-                      <div>
-                        <div className="text-gray-500 text-xs">Weapon</div>
-                        <div className="font-medium">Level {selectedEntity.weapon}</div>
-                      </div>
-                      <div>
-                        <div className="text-gray-500 text-xs">Armor</div>
-                        <div className="font-medium">Level {selectedEntity.armor}</div>
-                      </div>
-                      <div>
-                        <div className="text-gray-500 text-xs">Tool</div>
-                        <div className="font-medium">{
-                          selectedEntity.tool === 0 ? 'Wood' :
-                          selectedEntity.tool === 1 ? 'Gold' :
-                          selectedEntity.tool === 2 ? 'Food' :
-                          selectedEntity.tool === 3 ? 'Misc' : 'None'
-                        }</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-                    <h3 className="font-medium text-gray-700 mb-3">
-                      Group Affiliations (8 slots)
-                    </h3>
-                    <div className="space-y-1">
-                      {Array.from({ length: 8 }).map((_, slot) => {
-                        const groupId = selectedEntity.groups[slot] ?? -1;
-                        const isPrimary = slot === 0;
-                        return (
-                          <div 
-                            key={slot}
-                            className={`flex items-center justify-between p-2 rounded ${
-                              isPrimary ? 'bg-gray-900 text-white' : 'bg-gray-50'
-                            }`}
-                          >
-                            <span className="text-xs font-medium">Slot {slot}{isPrimary ? ' (Primary)' : ''}</span>
-                            <span className="text-sm">
-                              {groupId !== -1 ? (
-                                <span 
-                                  className="cursor-pointer hover:underline"
-                                  onClick={() => {
-                                    setActiveTab('groups');
-                                    setSelectedGroupId(groupId);
-                                  }}
-                                >
-                                  Group {groupId}
-                                </span>
-                              ) : (
-                                <span className="text-gray-400">Empty</span>
-                              )}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-                    <h3 className="font-medium text-gray-700 mb-3">Actions</h3>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={onFollow}
-                        className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
-                      >
-                        Follow
-                      </button>
-                      <button
-                        onClick={onClearInspect}
-                        className="px-3 py-1.5 bg-gray-500 text-white text-xs rounded hover:bg-gray-600"
-                      >
-                        Clear Selection
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (confirm('Kill this entity?')) {
-                            (window as any).killEntity?.(selectedEntity.id);
-                          }
-                        }}
-                        className="px-3 py-1.5 bg-red-600 text-white text-xs rounded hover:bg-red-700"
-                      >
-                        Kill
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center justify-center h-full text-gray-400">
-                  Select an entity to view details
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {activeTab === 'buildings' && (
-          <>
-            <div className="w-1/3 border-r border-gray-300 flex flex-col bg-white">
-              <div className="p-3 border-b border-gray-200">
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Search buildings..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:border-gray-500"
-                />
-              </div>
-              <div className="flex-1 overflow-y-auto">
-                {filteredBuildings.map(b => (
-                  <div
-                    key={b.id}
-                    onClick={() => handleBuildingClick(b.id)}
-                    className={`p-3 border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${
-                      selectedBuildingId === b.id ? 'bg-gray-100 border-l-4 border-l-green-500' : ''
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{b.typeName}</span>
-                        <span className="text-gray-400 text-xs">ID: {b.id}</span>
-                      </div>
-                    </div>
-                    <div className="mt-1 text-xs text-gray-500">
-                      Owner: Group {b.ownerGroup} · HP: {b.health}
-                    </div>
-                  </div>
-                ))}
-                {filteredBuildings.length === 0 && (
-                  <div className="p-4 text-center text-gray-400 text-sm">No buildings found</div>
-                )}
-              </div>
-              <div className="p-2 border-t border-gray-200 text-xs text-gray-500 text-center">
-                {filteredBuildings.length} buildings
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4">
-              {selectedBuilding ? (
-                <div className="space-y-4">
-                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <h2 className="text-lg font-semibold">{selectedBuilding.typeName}</h2>
-                      <span className="text-gray-500 text-sm">ID: {selectedBuilding.id}</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="text-gray-500">Position:</span>{' '}
-                        ({Math.round(selectedBuilding.positionX)}, {Math.round(selectedBuilding.positionY)})
-                      </div>
-                      <div>
-                        <span className="text-gray-500">Owner:</span>{' '}
-                        <span 
-                          className="cursor-pointer hover:underline"
-                          onClick={() => {
-                            setActiveTab('groups');
-                            setSelectedGroupId(selectedBuilding.ownerGroup);
-                          }}
-                        >
-                          Group {selectedBuilding.ownerGroup}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="mt-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-500 text-sm">Health:</span>
-                        <div className="flex-1 h-3 bg-gray-200 rounded-full overflow-hidden">
-                          <div 
-                            className="h-full bg-green-500 transition-all"
-                            style={{ width: `${(selectedBuilding.health / selectedBuilding.maxHealth) * 100}%` }}
-                          />
-                        </div>
-                        <span className="text-sm">{selectedBuilding.health}/{selectedBuilding.maxHealth}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-                    <h3 className="font-medium text-gray-700 mb-3">Influence</h3>
-                    <div className="text-sm">
-                      {selectedBuilding.type === 1 && <span className="text-blue-600">Radius: 200 units (Warehouse)</span>}
-                      {selectedBuilding.type === 2 && <span className="text-purple-600">Radius: 80 units (House)</span>}
-                      {selectedBuilding.type === 3 && <span className="text-red-600">Radius: 150 units (Tower)</span>}
-                      {selectedBuilding.type === 4 && <span className="text-gray-600">No influence (Wall)</span>}
-                      {selectedBuilding.type === 5 && <span className="text-green-600">No influence (Field)</span>}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center justify-center h-full text-gray-400">
-                  Select a building to view details
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {activeTab === 'rules' && (
-          <RulesTab ruleRegistry={ruleRegistry} logicBytecode={logicBytecode} />
-        )}
-      </div>
-
-      <div className="bg-gray-100 p-3 border-t border-gray-300">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4 text-xs">
-            <span className="text-gray-500">
-              Tick: {tickCount} | Last: {lastTickTime.toFixed(1)}ms | Avg: {avgTickTime.toFixed(1)}ms
+          <BrutalButton variant="primary" onClick={handlePauseToggle} className="w-10 h-10 p-0">
+            <span className="material-symbols-outlined font-bold">
+              {isPaused ? 'play_arrow' : 'pause'}
             </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-gray-600">Brush:</label>
-            <button 
-              onClick={() => setBrushActive(!brushActive)}
-              className={`px-2 py-1 text-xs rounded ${
-                brushActive ? 'bg-green-600 text-white' : 'bg-white border border-gray-300'
-              }`}
-            >
-              {brushActive ? 'ON' : 'OFF'}
-            </button>
-            {brushActive && (
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  value={brushGroupId}
-                  onChange={(e) => setBrushGroupId(parseInt(e.target.value))}
-                  className="w-16 px-2 py-1 text-xs border border-gray-300 rounded"
-                  placeholder="Group"
-                />
-                <select
-                  value={brushTrait}
-                  onChange={(e) => setBrushTrait(parseInt(e.target.value))}
-                  className="px-2 py-1 text-xs border border-gray-300 rounded"
-                >
-                  <option value={0}>NONE</option>
-                  <option value={1}>TREE</option>
-                  <option value={2}>AGGRO</option>
-                  <option value={4}>SCOUT</option>
-                </select>
+          </BrutalButton>
+          <BrutalButton variant="primary" onClick={() => document.getElementById('saveBtn')?.click()}>SAVE</BrutalButton>
+          <BrutalButton onClick={() => document.getElementById('loadBtn')?.click()}>LOAD</BrutalButton>
+        </div>
+      </header>
+
+      {/* Main Workspace Area */}
+      <main className="flex-1 relative flex items-center justify-center p-8 overflow-hidden">
+        {isWindowOpen && (
+          <BrutalWindow 
+            title="Inspector" 
+            onClose={() => { setIsWindowOpen(false); onClearInspect(); }}
+            tabs={
+              <div className="flex">
+                <BrutalTab active={activeTab === 'groups'} onClick={() => setActiveTab('groups')}>Groups</BrutalTab>
+                <BrutalTab active={activeTab === 'characters'} onClick={() => setActiveTab('characters')}>Characters</BrutalTab>
+                <BrutalTab active={activeTab === 'buildings'} onClick={() => setActiveTab('buildings')}>Buildings</BrutalTab>
+                <BrutalTab active={activeTab === 'rules'} onClick={() => setActiveTab('rules')}>Rules</BrutalTab>
               </div>
-            )}
+            }
+            footer={
+              <>
+                <div className="flex gap-6">
+                  <span>Pop: <strong className="text-on-surface">{totalPop.toLocaleString()}</strong></span>
+                  <span>Tick: <strong className="text-on-surface">{tickCount}</strong></span>
+                  <span>Last: <strong>{lastTickTime.toFixed(1)}ms</strong></span>
+                  <span>Avg: <strong>{avgTickTime.toFixed(1)}ms</strong></span>
+                </div>
+                <div className="flex items-center gap-2">
+                  Brush: <span className={`bg-surface border border-on-surface px-2 text-on-surface font-bold ${brushActive ? 'bg-primary-container' : ''}`}>{brushActive ? 'ON' : 'OFF'}</span>
+                </div>
+              </>
+            }
+          >
+            <div className="flex flex-1 overflow-hidden text-on-surface">
+              {/* Left Panel: List */}
+              <div className="w-1/3 border-r-2 border-on-surface bg-surface flex flex-col overflow-hidden">
+                <div className="p-4 border-b border-surface-variant flex flex-col gap-2">
+                  <input 
+                    type="text" 
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder={`Search ${activeTab}...`}
+                    className="w-full bg-surface border border-on-surface px-3 py-2 font-mono text-[13px] focus:outline-none focus:border-2 focus:border-on-surface text-on-surface"
+                  />
+                  {activeTab === 'characters' && (
+                    <select 
+                      value={filterState}
+                      onChange={(e) => setFilterState(parseInt(e.target.value))}
+                      className="w-full bg-surface border border-on-surface px-2 py-1 font-mono text-[11px] text-on-surface"
+                    >
+                      <option value={-1}>All States</option>
+                      {STATE_NAMES.map((name, i) => (
+                        <option key={i} value={i}>{name}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                  {activeTab === 'groups' && filteredGroups.map(g => (
+                    <div 
+                      key={g.id}
+                      onClick={() => setSelectedGroupId(g.id)}
+                      className={`p-4 border-b border-surface-variant cursor-pointer hover:bg-surface-container-low border-l-4 ${selectedGroupId === g.id ? 'bg-surface-container-highest border-l-primary-container' : 'border-l-transparent'}`}
+                    >
+                      <div className="flex justify-between items-start mb-1">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 border border-on-surface" style={{ backgroundColor: ARCHETYPE_COLORS[g.id % 4] }}></div>
+                          <span className="font-headline text-[18px] font-bold">{g.name}</span>
+                        </div>
+                        <span className="font-mono text-[13px] text-on-surface-variant">ID: #{g.id}</span>
+                      </div>
+                      <div className="font-mono text-[13px] text-on-surface-variant">{g.population} Population | {g.buildingCount} Buildings</div>
+                    </div>
+                  ))}
+
+                  {activeTab === 'characters' && filteredEntities.map(e => (
+                    <div 
+                      key={e.id}
+                      onClick={() => setSelectedEntityId(e.id)}
+                      className={`p-4 border-b border-surface-variant cursor-pointer hover:bg-surface-container-low border-l-4 ${selectedEntityId === e.id ? 'bg-surface-container-highest border-l-primary-container' : 'border-l-transparent'}`}
+                    >
+                      <div className="flex justify-between items-start mb-1">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 border border-on-surface" style={{ backgroundColor: ARCHETYPE_COLORS[e.faction % 4] }}></div>
+                          <span className="font-headline text-[18px] font-bold">Entity {e.id}</span>
+                        </div>
+                        <span className="font-mono text-[13px] text-on-surface-variant">#{e.id}</span>
+                      </div>
+                      <div className="font-mono text-[13px] text-on-surface-variant">{e.stateName} | Groups: {e.groups.join(', ')}</div>
+                    </div>
+                  ))}
+
+                  {activeTab === 'buildings' && filteredBuildings.map(b => (
+                    <div 
+                      key={b.id}
+                      onClick={() => setSelectedBuildingId(b.id)}
+                      className={`p-4 border-b border-surface-variant cursor-pointer hover:bg-surface-container-low border-l-4 ${selectedBuildingId === b.id ? 'bg-surface-container-highest border-l-primary-container' : 'border-l-transparent'}`}
+                    >
+                      <div className="flex justify-between items-start mb-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-headline text-[18px] font-bold">{b.typeName}</span>
+                        </div>
+                        <span className="font-mono text-[13px] text-on-surface-variant">ID: #{b.id}</span>
+                      </div>
+                      <div className="font-mono text-[13px] text-on-surface-variant">Owner: Group {b.ownerGroup} | HP: {b.health}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Right Panel: Dossier */}
+              <div className="flex-1 bg-surface-container-lowest flex flex-col overflow-y-auto p-6 gap-6 text-on-surface">
+                {activeTab === 'groups' && selectedGroup && (
+                  <>
+                    <div className="flex justify-between items-start border-b-2 border-on-surface pb-4">
+                      <div>
+                        <h2 className="font-headline text-[32px] font-bold uppercase flex items-center gap-3">
+                          <div className="w-6 h-6 border-2 border-on-surface" style={{ backgroundColor: ARCHETYPE_COLORS[selectedGroup.id % 4] }}></div>
+                          {selectedGroup.name}
+                        </h2>
+                        <div className="font-mono text-[13px] text-on-surface-variant mt-1">ID: {selectedGroup.id} | POPULATION: {selectedGroup.population} | WEALTH: {selectedGroup.wealth.toLocaleString()}</div>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-6">
+                      <div className="border-2 border-on-surface bg-surface p-4">
+                        <h3 className="font-mono text-[12px] font-bold uppercase mb-4 border-b border-on-surface pb-1">Resources</h3>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="bg-surface-container p-2 border border-on-surface text-on-surface">
+                            <div className="text-[10px] text-on-surface-variant uppercase">Wood</div>
+                            <div className="text-[18px] font-bold">{selectedGroup.wood}</div>
+                          </div>
+                          <div className="bg-surface-container p-2 border border-on-surface text-on-surface">
+                            <div className="text-[10px] text-on-surface-variant uppercase">Gold</div>
+                            <div className="text-[18px] font-bold">{selectedGroup.gold}</div>
+                          </div>
+                          <div className="bg-surface-container p-2 border border-on-surface text-on-surface">
+                            <div className="text-[10px] text-on-surface-variant uppercase">Food</div>
+                            <div className="text-[18px] font-bold">{selectedGroup.food}</div>
+                          </div>
+                          <div className="bg-surface-container p-2 border border-on-surface text-on-surface">
+                            <div className="text-[10px] text-on-surface-variant uppercase">Misc</div>
+                            <div className="text-[18px] font-bold">{selectedGroup.misc}</div>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="border-2 border-on-surface bg-surface p-4 flex flex-col">
+                        <h3 className="font-mono text-[12px] font-bold uppercase mb-2 border-b border-on-surface pb-1">Recent Chronicle</h3>
+                        <div className="flex-1 overflow-y-auto text-[10px] font-mono space-y-1">
+                          {chronicle.slice(0, 10).map((line, i) => (
+                            <div key={i} className="border-b border-surface-variant pb-1">{line}</div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border-2 border-on-surface bg-surface p-4">
+                      <h3 className="font-mono text-[12px] font-bold uppercase mb-4 border-b border-on-surface pb-1 text-on-surface">Group Members ({groupMembers.length})</h3>
+                      <div className="max-h-48 overflow-y-auto">
+                        <BrutalTable 
+                          headers={['ID', 'State', 'Health']}
+                          rows={groupMembers.slice(0, 20).map(m => [
+                            `#${m.id}`,
+                            m.stateName,
+                            m.health
+                          ])}
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {activeTab === 'characters' && selectedEntity && (
+                  <>
+                    <div className="flex justify-between items-start border-b-2 border-on-surface pb-4">
+                      <div>
+                        <h2 className="font-headline text-[32px] font-bold uppercase flex items-center gap-3">
+                          <div className="w-6 h-6 border-2 border-on-surface" style={{ backgroundColor: ARCHETYPE_COLORS[selectedEntity.faction % 4] }}></div>
+                          ENTITY {selectedEntity.id}
+                        </h2>
+                        <div className="font-mono text-[13px] text-on-surface-variant mt-1 uppercase font-bold">STATE: {selectedEntity.stateName} | POS: ({Math.round(selectedEntity.positionX)}, {Math.round(selectedEntity.positionY)})</div>
+                      </div>
+                      <div className="flex gap-2">
+                        <BrutalButton onClick={onFollow}>Follow</BrutalButton>
+                        <BrutalButton variant="error" onClick={() => (window as any).killEntity?.(selectedEntity.id)}>Terminate</BrutalButton>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-6">
+                      <div className="border-2 border-on-surface bg-surface p-4 text-on-surface">
+                        <h3 className="font-mono text-[12px] font-bold uppercase mb-4 border-b border-on-surface pb-1">Attributes</h3>
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-bold w-12 uppercase">Health</span>
+                            <div className="flex-1 h-4 bg-surface-container border border-on-surface relative">
+                              <div className="absolute inset-0 bg-secondary transition-all" style={{ width: `${(selectedEntity.health / 100) * 100}%` }}></div>
+                              <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-on-secondary mix-blend-difference">{selectedEntity.health}/100</span>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 text-center">
+                            <div className="bg-surface-container border border-on-surface p-1">
+                              <div className="text-[9px] text-on-surface-variant uppercase">DMG</div>
+                              <div className="font-bold">{selectedEntity.effectiveDamage}</div>
+                            </div>
+                            <div className="bg-surface-container border border-on-surface p-1">
+                              <div className="text-[9px] text-on-surface-variant uppercase">SPD</div>
+                              <div className="font-bold">{selectedEntity.effectiveSpeed.toFixed(1)}</div>
+                            </div>
+                            <div className="bg-surface-container border border-on-surface p-1">
+                              <div className="text-[9px] text-on-surface-variant uppercase">LIFE</div>
+                              <div className="font-bold">{selectedEntity.effectiveLifespan}</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="border-2 border-on-surface bg-surface p-4 text-on-surface">
+                        <h3 className="font-mono text-[12px] font-bold uppercase mb-4 border-b border-on-surface pb-1">Hierarchy</h3>
+                        <div className="space-y-1 overflow-y-auto max-h-32">
+                          {selectedEntity.groups.map((gid, i) => (
+                            <div key={i} className="flex justify-between items-center text-[11px] font-mono border-b border-surface-variant pb-1 last:border-0">
+                              <span>Slot {i}</span>
+                              <span className="font-bold">Group {gid}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {activeTab === 'buildings' && selectedBuilding && (
+                  <>
+                    <div className="flex justify-between items-start border-b-2 border-on-surface pb-4">
+                      <div>
+                        <h2 className="font-headline text-[32px] font-bold uppercase flex items-center gap-3">
+                          {selectedBuilding.typeName}
+                        </h2>
+                        <div className="font-mono text-[13px] text-on-surface-variant mt-1 uppercase font-bold">ID: {selectedBuilding.id} | OWNER: Group {selectedBuilding.ownerGroup}</div>
+                      </div>
+                    </div>
+                    <div className="border-2 border-on-surface bg-surface p-4 text-on-surface">
+                      <h3 className="font-mono text-[12px] font-bold uppercase mb-4 border-b border-on-surface pb-1">Integrity</h3>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-bold w-12 uppercase">Health</span>
+                        <div className="flex-1 h-6 bg-surface-container border border-on-surface relative">
+                          <div className="absolute inset-0 bg-tertiary transition-all" style={{ width: `${(selectedBuilding.health / selectedBuilding.maxHealth) * 100}%` }}></div>
+                          <span className="absolute inset-0 flex items-center justify-center text-[12px] font-bold text-on-tertiary mix-blend-difference">{selectedBuilding.health}/{selectedBuilding.maxHealth}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {activeTab === 'rules' && (
+                   <RulesTab ruleRegistry={ruleRegistry} logicBytecode={logicBytecode} />
+                )}
+              </div>
+            </div>
+          </BrutalWindow>
+        )}
+      </main>
+
+      {/* Footer Status Bar */}
+      <footer className="bg-on-surface text-surface fixed bottom-0 left-0 w-full z-50 flex justify-between items-center px-margin-md py-1 h-8 border-t-2 border-surface-variant font-mono text-[11px] pointer-events-auto">
+        <div className="flex items-center gap-4">
+          <span>TICK_RATE: {(1000/avgTickTime).toFixed(0)} | LATENCY: {lastTickTime.toFixed(1)}ms | AVG: {avgTickTime.toFixed(1)}ms</span>
+          <span className="w-2 h-2 bg-primary-container rounded-full animate-pulse"></span>
+        </div>
+        <div className="flex gap-4">
+          <a className="text-surface-variant hover:text-primary-fixed transition-colors" href="#">PERFORMANCE</a>
+          <a className="text-surface-variant hover:text-primary-fixed transition-colors" href="#">LOGS</a>
+          <a className="text-surface-variant hover:text-primary-fixed transition-colors" href="#">NETWORK</a>
+        </div>
+      </footer>
+
+      {/* Floating Action Button (Menu) */}
+      <button 
+        onClick={() => setIsWindowOpen(!isWindowOpen)}
+        className="fixed bottom-12 right-6 bg-primary-container text-on-primary-container border-4 border-on-surface rounded-full w-14 h-14 flex items-center justify-center shadow-brutal hover:bg-on-surface hover:text-primary-container transition-colors z-50 pointer-events-auto"
+      >
+        <span className="material-symbols-outlined text-[32px]">
+          {isWindowOpen ? 'close' : 'menu'}
+        </span>
+      </button>
+
+      {/* Tooltip for Brush State */}
+      {brushActive && (
+        <div className="fixed top-20 right-6 bg-surface border-2 border-on-surface p-3 shadow-brutal pointer-events-auto z-40 w-48 font-mono text-[11px] text-on-surface">
+          <div className="font-bold border-b border-on-surface mb-2 pb-1 uppercase">Brush Controls</div>
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <span>Active</span>
+              <BrutalButton onClick={() => setBrushActive(false)} variant="error" className="px-1 py-0 h-4">OFF</BrutalButton>
+            </div>
+            <div className="space-y-1">
+              <label className="block text-[9px] text-on-surface-variant uppercase">Target Group</label>
+              <input 
+                type="number" 
+                value={brushGroupId}
+                onChange={(e) => setBrushGroupId(parseInt(e.target.value))}
+                className="w-full border border-on-surface px-1 py-0.5 bg-surface-container text-on-surface"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="block text-[9px] text-on-surface-variant uppercase">Trait Bitmask</label>
+              <select 
+                value={brushTrait}
+                onChange={(e) => setBrushTrait(parseInt(e.target.value))}
+                className="w-full border border-on-surface px-1 py-0.5 bg-surface-container text-on-surface"
+              >
+                <option value={0}>NONE</option>
+                <option value={1}>TREE</option>
+                <option value={2}>AGGRO</option>
+                <option value={4}>SCOUT</option>
+              </select>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
@@ -939,38 +703,38 @@ const RulesTab: React.FC<{ ruleRegistry: Int32Array | null; logicBytecode: Int32
     : rules;
 
   return (
-    <div className="w-full p-4 overflow-y-auto">
-      <div className="mb-4">
+    <div className="w-full flex flex-col h-full bg-surface-container-lowest text-on-surface">
+      <div className="p-4 border-b border-on-surface">
         <input
           type="text"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          placeholder="Search rules by index or group ID..."
-          className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+          placeholder="Search rules..."
+          className="w-full px-3 py-2 border border-on-surface rounded font-mono text-[13px] bg-surface text-on-surface"
         />
       </div>
-      <div className="space-y-3">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {filteredRules.map(r => (
-          <div key={r.index} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-            <div className="flex items-center justify-between mb-3">
+          <div key={r.index} className="bg-surface border-2 border-on-surface p-4 shadow-brutal-sm">
+            <div className="flex items-center justify-between mb-3 border-b border-on-surface pb-1 text-on-surface">
               <div className="flex items-center gap-2">
-                <span className="font-semibold">Rule #{r.index}</span>
+                <span className="font-mono font-bold text-[14px]">RULE #{r.index}</span>
                 <input
                   type="checkbox"
                   checked={r.enabled}
                   onChange={(e) => updateRule(r.index, 'enabled', e.target.checked)}
-                  className="accent-gray-900"
+                  className="accent-on-surface w-4 h-4 rounded-none border-2 border-on-surface bg-surface"
                 />
               </div>
-              <div className="text-xs text-gray-500">Subject Group: {r.subjectId}</div>
+              <div className="text-[11px] font-mono text-on-surface-variant uppercase font-bold">Subject Group: {r.subjectId}</div>
             </div>
-            <div className="grid grid-cols-4 gap-2 mb-3 text-xs">
+            <div className="grid grid-cols-4 gap-4 mb-4 text-[11px] font-mono text-on-surface">
               <div>
-                <label className="block text-gray-500">Action</label>
+                <label className="block text-on-surface-variant uppercase font-bold mb-1">Action</label>
                 <select
                   value={r.actionState}
                   onChange={(e) => updateRule(r.index, 'actionState', parseInt(e.target.value))}
-                  className="w-full border border-gray-300 rounded px-1"
+                  className="w-full border-2 border-on-surface bg-surface px-1 py-0.5 text-on-surface"
                 >
                   <option value={1}>Harvest</option>
                   <option value={2}>Flee</option>
@@ -980,37 +744,37 @@ const RulesTab: React.FC<{ ruleRegistry: Int32Array | null; logicBytecode: Int32
                 </select>
               </div>
               <div>
-                <label className="block text-gray-500">Threshold</label>
+                <label className="block text-on-surface-variant uppercase font-bold mb-1">Threshold</label>
                 <input
                   type="number"
                   value={r.threshold}
                   onChange={(e) => updateRule(r.index, 'threshold', parseInt(e.target.value))}
-                  className="w-full border border-gray-300 rounded px-1"
+                  className="w-full border-2 border-on-surface bg-surface px-1 py-0.5 text-on-surface"
                 />
               </div>
               <div>
-                <label className="block text-gray-500">Target X</label>
+                <label className="block text-on-surface-variant uppercase font-bold mb-1">Target X</label>
                 <input
                   type="number"
                   value={r.targetX}
                   onChange={(e) => updateRule(r.index, 'targetX', parseInt(e.target.value))}
-                  className="w-full border border-gray-300 rounded px-1"
+                  className="w-full border-2 border-on-surface bg-surface px-1 py-0.5 text-on-surface"
                 />
               </div>
               <div>
-                <label className="block text-gray-500">Target Y</label>
+                <label className="block text-on-surface-variant uppercase font-bold mb-1">Target Y</label>
                 <input
                   type="number"
                   value={r.targetY}
                   onChange={(e) => updateRule(r.index, 'targetY', parseInt(e.target.value))}
-                  className="w-full border border-gray-300 rounded px-1"
+                  className="w-full border-2 border-on-surface bg-surface px-1 py-0.5 text-on-surface"
                 />
               </div>
             </div>
-            <div className="flex flex-wrap gap-1">
+            <div className="flex flex-wrap gap-2 text-on-surface">
               {r.nodes.map((n: any, ni: number) => (
-                <div key={ni} className="flex items-center gap-1 bg-gray-100 px-2 py-1 rounded text-xs">
-                  <span className="font-medium">
+                <div key={ni} className="flex items-center gap-1 bg-surface-container border border-on-surface px-2 py-1 text-[11px] font-mono">
+                  <span className="font-bold">
                     {n.op === 0 ? 'POP>' : n.op === 1 ? 'W<' : n.op === 2 ? 'REL<' : n.op === 3 ? 'DIST>' : '?'}
                   </span>
                   <input
@@ -1020,25 +784,22 @@ const RulesTab: React.FC<{ ruleRegistry: Int32Array | null; logicBytecode: Int32
                       const next = [...r.nodes]; next[ni] = { ...next[ni], val: parseInt(e.target.value) };
                       updateRule(r.index, 'nodes', next);
                     }}
-                    className="w-12 border border-gray-300 rounded px-1"
+                    className="w-12 border border-on-surface bg-surface px-1 ml-1 text-on-surface"
                   />
                   <button
                     onClick={() => {
                       const next = r.nodes.filter((_: any, i: number) => i !== ni);
                       updateRule(r.index, 'nodes', next);
                     }}
-                    className="text-red-500 font-bold"
+                    className="text-error font-bold ml-1 hover:scale-125 transition-transform"
                   >
                     ×
                   </button>
                 </div>
               ))}
-              <button
-                onClick={() => updateRule(r.index, 'nodes', [...r.nodes, { op: 0, val: 0 }])}
-                className="px-2 py-1 bg-gray-200 rounded text-xs hover:bg-gray-300"
-              >
-                + Add
-              </button>
+              <BrutalButton onClick={() => updateRule(r.index, 'nodes', [...r.nodes, { op: 0, val: 0 }])} variant="ghost" className="border-dashed border-on-surface/30">
+                + Add Node
+              </BrutalButton>
             </div>
           </div>
         ))}
@@ -1047,4 +808,4 @@ const RulesTab: React.FC<{ ruleRegistry: Int32Array | null; logicBytecode: Int32
   );
 };
 
-export default App;App;
+export default App;

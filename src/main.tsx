@@ -45,7 +45,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     const canvas = document.getElementById('simCanvas') as HTMLCanvasElement;
     if (!canvas) { console.error("Canvas #simCanvas not found!"); return; }
-    
+
     const gl = canvas.getContext('webgl2', { alpha: false, antialias: true }) as any;
     if (!gl) {
         console.error("WebGL 2 not supported!");
@@ -53,6 +53,22 @@ window.addEventListener('DOMContentLoaded', () => {
         return;
     }
     console.log("WebGL 2 context obtained.");
+
+    // PRE-ALLOCATED BUFFERS FOR RENDERING (Eliminates GC triggers in hot loop)
+    const uCam = new Float32Array([0, 0, 0, 0]);
+    const uRes = new Float32Array([0, 0]);
+
+    function resizeCanvas() {
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        uRes[0] = canvas.width;
+        uRes[1] = canvas.height;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
 
     const workers: Worker[] = [];
     try {
@@ -65,6 +81,8 @@ window.addEventListener('DOMContentLoaded', () => {
         alert("Failed to spawn workers. Your browser might not support ES module workers.");
         return;
     }
+
+    const uiWorker = new Worker(new URL('./uiWorker.ts', import.meta.url), { type: 'module' });
 
     const saveBtn = document.getElementById('saveBtn') as HTMLButtonElement;
     const loadBtn = document.getElementById('loadBtn') as HTMLButtonElement;
@@ -475,10 +493,6 @@ window.addEventListener('DOMContentLoaded', () => {
     let lastTickDuration = 0, avgTickDuration = 0, tickTimes: number[] = [], chronicle: string[] = [];
     let isTickInProgress = false, completedWorkersThisTick = 0, lastTickStartTime = 0;
 
-    // PRE-ALLOCATED BUFFERS FOR RENDERING (Eliminates GC triggers in hot loop)
-    const uCam = new Float32Array([0, 0, 0, 0]);
-    const uRes = new Float32Array([canvas.width, canvas.height]);
-
     // CACHED UNIFORM LOCATIONS
     const locs = {
         tile: { res: gl.getUniformLocation(tileProg, 'u_resolution'), cam: gl.getUniformLocation(tileProg, 'u_camera') },
@@ -515,7 +529,7 @@ window.addEventListener('DOMContentLoaded', () => {
     speedBtns[4].onclick = () => setSpeed(0, 4);
 
     window.addEventListener('wheel', (e) => {
-        if (uiPopup.classList.contains('visible')) return;
+        if (uiPopup.classList.contains('visible') || document.body.dataset.uiOpen === 'true') return;
         const rect = canvas.getBoundingClientRect();
         const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
         const mx = (e.clientX - rect.left) * scaleX, my = (e.clientY - rect.top) * scaleY;
@@ -527,16 +541,16 @@ window.addEventListener('DOMContentLoaded', () => {
 
     let isDragging = false, lastX = 0, lastY = 0;
     canvas.addEventListener('mousedown', (e) => { 
-        if (uiPopup.classList.contains('visible')) return;
+        if (uiPopup.classList.contains('visible') || document.body.dataset.uiOpen === 'true') return;
         isDragging = true; lastX = e.clientX; lastY = e.clientY; 
     });
     window.addEventListener('mouseup', () => isDragging = false);
     window.addEventListener('mousemove', (e) => {
-        if (isDragging && !uiPopup.classList.contains('visible')) { cameraX -= (e.clientX - lastX) / zoom; cameraY -= (e.clientY - lastY) / zoom; lastX = e.clientX; lastY = e.clientY; }
+        if (isDragging && !uiPopup.classList.contains('visible') && document.body.dataset.uiOpen !== 'true') { cameraX -= (e.clientX - lastX) / zoom; cameraY -= (e.clientY - lastY) / zoom; lastX = e.clientX; lastY = e.clientY; }
     });
 
     canvas.addEventListener('click', (e) => {
-      if (uiPopup.classList.contains('visible')) return;
+      if (uiPopup.classList.contains('visible') || document.body.dataset.uiOpen === 'true') return;
       const rect = canvas.getBoundingClientRect();
       const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
       const worldX = cameraX + ((e.clientX - rect.left) * scaleX) / zoom;
@@ -784,7 +798,7 @@ window.addEventListener('DOMContentLoaded', () => {
             effectiveSpeed: 1,
             effectiveLifespan: 80
         };
-        root.render(<App ruleRegistry={ruleRegistry} logicBytecode={logicBytecode} groupPopulation={groupPopulation} groupTotalWealth={groupTotalWealth} groupBuildingCount={groupBuildingCount} groupWood={groupWood} groupGold={groupGold} groupFood={groupFood} groupMisc={groupMisc} tickCount={tickCount} lastTickTime={lastTickDuration} avgTickTime={avgTickDuration} inspectEntity={inspectEntity} chronicle={chronicle} onFollow={() => { followEntityId = inspectEntityId; }} onClearInspect={() => { inspectEntityId = -1; followEntityId = -1; }} />);
+        root.render(<App uiWorker={uiWorker} ruleRegistry={ruleRegistry} logicBytecode={logicBytecode} groupPopulation={groupPopulation} groupTotalWealth={groupTotalWealth} groupBuildingCount={groupBuildingCount} groupWood={groupWood} groupGold={groupGold} groupFood={groupFood} groupMisc={groupMisc} tickCount={tickCount} lastTickTime={lastTickDuration} avgTickTime={avgTickDuration} inspectEntity={inspectEntity} chronicle={chronicle} onFollow={() => { followEntityId = inspectEntityId; }} onClearInspect={() => { inspectEntityId = -1; followEntityId = -1; }} />);
     }
 
     workers.forEach((w, i) => {
@@ -798,6 +812,9 @@ window.addEventListener('DOMContentLoaded', () => {
           playerTargetX = new Float32Array(buffers.playerTargetX); playerTargetY = new Float32Array(buffers.playerTargetY); scenarioState = new Int32Array(buffers.scenarioState);
           projPositionX = new Float32Array(buffers.projPositionX); projPositionY = new Float32Array(buffers.projPositionY); projType = new Uint8Array(buffers.projType); projLifeTime = new Int16Array(buffers.projLifeTime);
           itemInstanceX = new Float32Array(buffers.itemInstanceX); itemInstanceY = new Float32Array(buffers.itemInstanceY); itemInstanceOwnerType = new Uint8Array(buffers.itemInstanceOwnerType); itemInstanceDefId = new Uint16Array(buffers.itemInstanceDefId);
+          
+          uiWorker.postMessage({ type: "INIT", buffers });
+          
           workers.slice(1).forEach((sw, si) => sw.postMessage({ type: "INIT", payload: { quadrantIndex: si + 1, buffers } }));
           requestAnimationFrame(render); setInterval(syncReact, 200);
           startTick();

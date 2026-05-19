@@ -243,7 +243,7 @@ export function initializeState(): void {
   groupNames = new Map<number, string>();
   entityNames = new Map<number, string>();
   ruleRegistry = new Int32Array(new SharedArrayBuffer(C.MAX_RULES * 8 * 4));
-  workerSync = new Int32Array(new SharedArrayBuffer(4 * 4));
+  workerSync = new Int32Array(new SharedArrayBuffer(8 * 4));
   logicBytecode = new Int32Array(new SharedArrayBuffer(C.MAX_RULES * C.MAX_BYTECODE_PER_RULE * 4));
   groupPopulationCount = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));
   groupBuildingCount = new Int32Array(new SharedArrayBuffer(C.MAX_GROUPS * 4));

@@ -5,22 +5,58 @@ import * as S from './simulation/state';
 import * as U from './simulation/utils';
 import * as P from './simulation/systems/parallel';
 import * as M from './simulation/systems/master';
+import { rebuildSpatialHash } from './simulation/systems/spatialHash';
+import { runSteeringSystem } from './simulation/systems/steering';
+import { runMovementSystem } from './simulation/systems/movement';
+import { runCombatSystem } from './simulation/systems/combat';
+import { runGatheringSystem } from './simulation/systems/gathering';
+import { runLifecycleSystem } from './simulation/systems/lifecycle';
 import { initializeWorld } from './simulation/initialization';
 import { applyGroupTemplate } from './simulation/templates';
 
 function tick(): void {
   if (S.isPaused) return;
 
-  // Sync point 0: Start of tick alignment
+  const entitiesPerWorker = Math.ceil(C.MAX_ENTITIES / 4);
+  const startIndex = S.quadrantIndex * entitiesPerWorker;
+  const endIndex = Math.min(C.MAX_ENTITIES, startIndex + entitiesPerWorker);
+  const stateBuffer = S.positionX.buffer as SharedArrayBuffer;
+
+  // Sync point 0: Start of tick
   U.waitForAll(0);
 
-  // Phase 1: Spatial & Intelligence peeking
-  P.SpatialUpdateSystem();
-  P.IntelReportingSystem();
+  // Throttled stat clearing (every 60 ticks)
+  if (S.quadrantIndex === 0 && S.tickCount % 60 === 0) {
+    S.groupPopulationCount.fill(0);
+    S.groupBuildingCount.fill(0);
+    S.groupTotalWealth.fill(0);
+    S.groupWood.fill(0);
+    S.groupGold.fill(0);
+    S.groupFood.fill(0);
+    S.groupMisc.fill(0);
+    S.groupHouseCapacity.fill(0);
+    S.groupWarehouseX.fill(0);
+    S.groupWarehouseY.fill(0);
+  }
 
-  // Phase 1.5: Throttled Global Systems (Only quadrant 0)
+  // Barrier 1: Ensure stats are cleared before parallel systems start adding to them
+  U.waitForAll(1);
+
+  // --- PARALLEL ECS SYSTEMS ---
+  rebuildSpatialHash(stateBuffer, startIndex, endIndex);
+  runSteeringSystem(stateBuffer, startIndex, endIndex);
+  runMovementSystem(stateBuffer, startIndex, endIndex);
+  runCombatSystem(stateBuffer, startIndex, endIndex);
+  runGatheringSystem(stateBuffer, startIndex, endIndex);
+  runLifecycleSystem(stateBuffer, startIndex, endIndex);
+
+  // Barrier 2: Ensure all workers finished their parallel tasks
+  U.waitForAll(2);
+
+  // Phase 3: Master Orchestration (Only worker 0)
   if (S.quadrantIndex === 0) {
-    M.SummarySystem();
+    M.SummarySystem(); // Uses the aggregated stats from parallel systems
+    
     if (S.tickCount % 60 === 0) {
       M.RuleEvaluationSystem();
       M.TradeSystem();
@@ -30,26 +66,16 @@ function tick(): void {
       M.StructureEvolutionSystem();
     }
     M.GroupKnowledgeDecaySystem();
-    M.BuffSystem();  // Run once per day (3600 ticks)
+    M.BuffSystem(); 
   }
 
-  // Phase 2: Autonomy & Steering
-  P.LifeSystem();
-  P.ProjectileSystem();
-  P.AuraSystem();
-  P.AutonomySystem();
-  P.SteeringSystem();
+  // Barrier 3: Ensure worker 0 finished master logic before anyone increments tick
+  U.waitForAll(3);
 
-  // Barrier 1: Sync before movement
-  U.waitForAll(1);
-
-  // Phase 3: Physical Movement
-  P.MovementSystem();
-
-  // Barrier 2: Sync before finishing
-  U.waitForAll(2);
-
-  S.incrementTick();
+  if (S.quadrantIndex === 0) S.incrementTick();
+  
+  // Final barrier to keep workers in lock-step
+  U.waitForAll(4);
 }
 
 self.onmessage = (e: MessageEvent) => {
