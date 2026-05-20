@@ -1,10 +1,40 @@
+// src/simulation/systems/steering.ts
 import * as C from "../constants";
 import * as S from "../state";
 import * as U from "../utils";
 
+const outVec = { x: 0, y: 0 };
+
+/**
+ * Decodes the Int8 angle byte from a shared flow field and sets outVec to the normalized 2D direction.
+ * Returns true if a valid non-zero flow vector was found.
+ */
+function getFlowVector(
+  flowField: Int8Array,
+  offset: number,
+  px: number,
+  py: number,
+  outVec: { x: number; y: number }
+): boolean {
+  const cx = Math.floor(px / 10);
+  const cy = Math.floor(py / 10);
+  if (cx < 0 || cx >= C.WORLD_MAP_COLS || cy < 0 || cy >= C.WORLD_MAP_ROWS) {
+    return false;
+  }
+  const idx = offset + (cy * C.WORLD_MAP_COLS + cx);
+  const angleByte = flowField[idx];
+  if (angleByte === -128) {
+    return false;
+  }
+  const angle = (angleByte / 127) * Math.PI;
+  outVec.x = Math.cos(angle);
+  outVec.y = Math.sin(angle);
+  return true;
+}
+
 /**
  * Steering System
- * Calculates desired velocity vectors based on entity state, targets, and environment.
+ * Calculates desired velocity vectors based on entity state, targets, and shared flow fields.
  */
 export function runSteeringSystem(
   state: SharedArrayBuffer,
@@ -21,6 +51,19 @@ export function runSteeringSystem(
     }
 
     if (S.state[i] === C.EntityState.Dead) continue;
+
+    const stateVal = S.state[i];
+    const isActionState =
+      stateVal === C.EntityState.Harvesting ||
+      stateVal === C.EntityState.ReturningToDepot ||
+      stateVal === C.EntityState.Construction ||
+      stateVal === C.EntityState.Trading;
+
+    if (isActionState && S.actionTimer[i] > 0) {
+      S.velocityX[i] = 0;
+      S.velocityY[i] = 0;
+      continue;
+    }
 
     const targetId = S.targetEntityId[i];
 
@@ -68,26 +111,6 @@ export function runSteeringSystem(
       }
     }
 
-    // Player Override Logic
-    if (targetId === -3) {
-      const tx = S.playerTargetX[i],
-        ty = S.playerTargetY[i];
-      const dx = tx - S.positionX[i],
-        dy = ty - S.positionY[i];
-      const distSq = dx * dx + dy * dy;
-      if (distSq > 4.0) {
-        const dist = Math.sqrt(distSq);
-        const speed = S.effectiveSpeed[i] || 1.0;
-        S.velocityX[i] = (dx / dist) * speed * 2.0;
-        S.velocityY[i] = (dy / dist) * speed * 2.0;
-      } else {
-        S.velocityX[i] = 0;
-        S.velocityY[i] = 0;
-        S.targetEntityId[i] = -1;
-      }
-      continue;
-    }
-
     // Mounted Steering (Vehicle Control)
     if (S.isMounted[i] === 1) {
       const vId = S.targetVehicleId[i];
@@ -124,7 +147,7 @@ export function runSteeringSystem(
     // Standard State-based Steering
     let targetX = -1,
       targetY = -1,
-      stopDistSq = 4.0;
+      stopDistSq = C.DIST_SQ_ARRIVAL;
     const speed = S.effectiveSpeed[i] || 1.0;
 
     if (S.state[i] === C.EntityState.Idle) {
@@ -133,6 +156,15 @@ export function runSteeringSystem(
         S.velocityY[i] = (Math.random() - 0.5) * 2;
       }
       continue;
+    }
+
+    // Determine target coordinate and lookup flow field vector based on entity state
+    let gotFlow = false;
+
+    if (targetId === -3) {
+      targetX = S.playerTargetX[i];
+      targetY = S.playerTargetY[i];
+      stopDistSq = C.DIST_SQ_ARRIVAL;
     } else if (S.state[i] === C.EntityState.Fleeing && targetId !== -1) {
       const dx = S.positionX[i] - S.positionX[targetId],
         dy = S.positionY[i] - S.positionY[targetId];
@@ -144,14 +176,40 @@ export function runSteeringSystem(
       continue;
     } else if (S.state[i] === C.EntityState.Harvesting) {
       const bldId = S.targetBuildingId[i];
+      let tX = -1, tY = -1;
       if (bldId !== -1) {
-        targetX = S.bldPositionX[bldId];
-        targetY = S.bldPositionY[bldId];
+        tX = S.bldPositionX[bldId];
+        tY = S.bldPositionY[bldId];
       } else if (targetId !== -1) {
-        targetX = S.positionX[targetId];
-        targetY = S.positionY[targetId];
+        tX = S.positionX[targetId];
+        tY = S.positionY[targetId];
       }
-      stopDistSq = 4.0;
+      if (tX !== -1) {
+        const angle = (i * C.GOLDEN_ANGLE_RAD) % (Math.PI * 2);
+        targetX = tX + Math.cos(angle) * C.FORMATION_RING_RESOURCE;
+        targetY = tY + Math.sin(angle) * C.FORMATION_RING_RESOURCE;
+      }
+      stopDistSq = C.DIST_SQ_ARRIVAL;
+
+      if (targetId !== -1) {
+        tX = S.positionX[targetId];
+        tY = S.positionY[targetId];
+        const tTraits = S.traitBitmask[targetId];
+        if ((tTraits & C.TRAIT_TREE) !== 0) {
+          gotFlow = getFlowVector(S.flowFieldWood, 0, S.positionX[i], S.positionY[i], outVec);
+        } else if ((tTraits & C.TRAIT_GOLD) !== 0) {
+          gotFlow = getFlowVector(S.flowFieldGold, 0, S.positionX[i], S.positionY[i], outVec);
+        } else if ((tTraits & C.TRAIT_BUSH) !== 0) {
+          gotFlow = getFlowVector(S.flowFieldFood, 0, S.positionX[i], S.positionY[i], outVec);
+        }
+      } else if (bldId !== -1 && S.bldType[bldId] === 5) {
+        gotFlow = getFlowVector(S.flowFieldFood, 0, S.positionX[i], S.positionY[i], outVec);
+      } else if (targetId === -1 && bldId === -1) {
+        // No specific target yet, follow objective flow field based on chosen tool
+        if (S.charTool[i] === 0) gotFlow = getFlowVector(S.flowFieldWood, 0, S.positionX[i], S.positionY[i], outVec);
+        else if (S.charTool[i] === 1) gotFlow = getFlowVector(S.flowFieldGold, 0, S.positionX[i], S.positionY[i], outVec);
+        else if (S.charTool[i] === 2) gotFlow = getFlowVector(S.flowFieldFood, 0, S.positionX[i], S.positionY[i], outVec);
+      }
     } else if (
       S.state[i] === C.EntityState.ReturningToDepot ||
       S.state[i] === C.EntityState.Construction
@@ -165,7 +223,7 @@ export function runSteeringSystem(
       if (bldId !== -1) {
         bX = S.bldPositionX[bldId];
         bY = S.bldPositionY[bldId];
-        bRad = S.bldType[bldId] === 1 ? 12.0 : 8.0;
+        bRad = S.bldType[bldId] === C.BuildingType.Warehouse ? C.FORMATION_RING_WAREHOUSE : C.FORMATION_RING_HOUSE;
       } else {
         const whId = U.findNearestBuilding(
           S.positionX[i],
@@ -177,20 +235,25 @@ export function runSteeringSystem(
         if (whId !== -1) {
           bX = S.bldPositionX[whId];
           bY = S.bldPositionY[whId];
-          bRad = 12.0;
+          bRad = C.FORMATION_RING_WAREHOUSE;
         } else {
           bX = S.groupWarehouseX[gid];
           bY = S.groupWarehouseY[gid];
-          bRad = 12.0;
+          bRad = C.FORMATION_RING_WAREHOUSE;
         }
       }
 
       if (bX !== -1) {
-        // Target a unique point on a ring around the building
-        const angle = (i * 0.618033) % (Math.PI * 2); // Golden ratio spread
+        const angle = (i * C.GOLDEN_ANGLE_RAD) % (Math.PI * 2);
         targetX = bX + Math.cos(angle) * bRad;
         targetY = bY + Math.sin(angle) * bRad;
-        stopDistSq = 9.0; // Stop within 3 units of the ring point
+        stopDistSq = C.DIST_SQ_ARRIVAL;
+      }
+
+      if (gid >= 0 && gid < C.MAX_GROUPS) {
+        const slot = gid % 16;
+        const pageSize = C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS;
+        gotFlow = getFlowVector(S.flowFieldGroupHQ, slot * pageSize, S.positionX[i], S.positionY[i], outVec);
       }
     } else if (S.state[i] === C.EntityState.Combat) {
       const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS];
@@ -200,124 +263,143 @@ export function runSteeringSystem(
     } else if (S.state[i] === C.EntityState.Trading) {
       const targetGid = -S.targetEntityId[i] - 1000;
       if (targetGid >= 0 && targetGid < C.MAX_GROUPS) {
-        targetX = S.groupWarehouseX[targetGid];
-        targetY = S.groupWarehouseY[targetGid];
+        const tX = S.groupWarehouseX[targetGid];
+        const tY = S.groupWarehouseY[targetGid];
+        const angle = (i * C.GOLDEN_ANGLE_RAD) % (Math.PI * 2);
+        targetX = tX + Math.cos(angle) * C.FORMATION_RING_WAREHOUSE;
+        targetY = tY + Math.sin(angle) * C.FORMATION_RING_WAREHOUSE;
       }
-      stopDistSq = 16.0;
+      stopDistSq = C.DIST_SQ_ARRIVAL;
     } else if (S.state[i] === C.EntityState.ReportingIntel) {
       const gid = S.groupAffiliations[i * C.MAX_GROUP_CHANNELS];
       targetX = S.groupWarehouseX[gid];
       targetY = S.groupWarehouseY[gid];
       stopDistSq = 1.0;
+
+      if (gid >= 0 && gid < C.MAX_GROUPS) {
+        const slot = gid % 16;
+        const pageSize = C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS;
+        gotFlow = getFlowVector(S.flowFieldGroupHQ, slot * pageSize, S.positionX[i], S.positionY[i], outVec);
+      }
     } else if (S.state[i] === C.EntityState.Looting) {
       const targetItem = S.targetItemId[i];
       if (targetItem !== -1 && targetItem < C.MAX_ITEM_INSTANCES) {
         targetX = S.itemInstanceX[targetItem];
         targetY = S.itemInstanceY[targetItem];
       }
-      stopDistSq = 4.0;
+      stopDistSq = C.DIST_SQ_ARRIVAL;
+    } else if (S.state[i] === C.EntityState.Sabotaging) {
+      const bldId = S.targetBuildingId[i];
+      if (bldId !== -1) {
+        targetX = S.bldPositionX[bldId];
+        targetY = S.bldPositionY[bldId];
+      }
+      stopDistSq = C.DIST_SQ_ARRIVAL;
     }
 
-    if (targetX !== -1) {
-      const dx = targetX - S.positionX[i],
-        dy = targetY - S.positionY[i];
-      const distSq = dx * dx + dy * dy;
+    let vx = 0;
+    let vy = 0;
+    let distSq = 0;
+
+    if (targetX !== -1 && targetY !== -1) {
+      const dx = targetX - S.positionX[i];
+      const dy = targetY - S.positionY[i];
+      distSq = dx * dx + dy * dy;
 
       if (distSq < stopDistSq) {
-        S.velocityX[i] = 0;
-        S.velocityY[i] = 0;
+        vx = 0;
+        vy = 0;
+        if (targetId === -3) {
+          S.targetEntityId[i] = -1;
+        }
       } else {
         const dist = Math.sqrt(distSq);
-        let vx = (dx / dist) * speed * 1.5;
-        let vy = (dy / dist) * speed * 1.5;
+        const currentSpeed = (targetId === -3) ? speed * 2.0 : speed * 1.5;
 
-        // --- INTELLIGENT OBSTACLE AVOIDANCE ---
-        // Look ahead 1 tile
-        const lookAhead = 12.0;
-        const lax = S.positionX[i] + vx * lookAhead;
-        const lay = S.positionY[i] + vy * lookAhead;
-
-        let blockedByBuilding = false;
-        const nearbyBldId = U.findNearestBuilding(lax, lay, 15, -1, -1);
-        if (nearbyBldId !== -1) {
-          const bType = S.bldType[nearbyBldId];
-          if (bType === 1 || bType === 2 || bType === 3 || bType === 4) {
-            const bRadius = bType === 1 ? 8.0 : 5.0;
-            const bdx = S.bldPositionX[nearbyBldId] - lax;
-            const bdy = S.bldPositionY[nearbyBldId] - lay;
-            if (bdx * bdx + bdy * bdy < bRadius * bRadius) {
-              blockedByBuilding = true;
-            }
-          }
+        // Use Flow Vector if valid and far enough away, otherwise fallback to direct heading
+        if (gotFlow && dist >= C.FLOW_FIELD_FALLBACK_DIST) {
+          vx = outVec.x * currentSpeed;
+          vy = outVec.y * currentSpeed;
+        } else {
+          vx = (dx / dist) * currentSpeed;
+          vy = (dy / dist) * currentSpeed;
         }
+      }
+    } else if (gotFlow) {
+      // We have no specific target coordinate yet, but we have a valid flow field direction!
+      const currentSpeed = speed * 1.5;
+      vx = outVec.x * currentSpeed;
+      vy = outVec.y * currentSpeed;
+      distSq = 1000.0; // Artificial distance to ensure separation works
+    }
 
-        const tx = Math.floor(lax / 10),
-          ty = Math.floor(lay / 10);
+    // Entity-to-Entity Separation local repulsion
+    let sepX = 0;
+    let sepY = 0;
+    let sepCount = 0;
 
-        if (
-          blockedByBuilding ||
-          (tx >= 0 && tx < C.WORLD_MAP_COLS && ty >= 0 && ty < C.WORLD_MAP_ROWS)
-        ) {
-          let terrainBlock = false;
-          if (!blockedByBuilding) {
-            const terrain = S.worldMap[ty * C.WORLD_MAP_COLS + tx];
-            if (
-              terrain === C.TerrainType.Mountain ||
-              terrain === C.TerrainType.Ocean
-            )
-              terrainBlock = true;
-          }
+    const shouldSeparate = !(isActionState && distSq < C.DIST_SQ_GHOSTING);
 
-          if (blockedByBuilding || terrainBlock) {
-            // Path is blocked! Find nearest navigable neighbor and deflect
-            let bestAx = 0,
-              bestAy = 0,
-              found = false;
-            for (let ay = -2; ay <= 2; ay++) {
-              // Wider search for building avoidance
-              for (let ax = -2; ax <= 2; ax++) {
-                if (ax === 0 && ay === 0) continue;
-                const nx = Math.floor(S.positionX[i] / 10) + ax;
-                const ny = Math.floor(S.positionY[i] / 10) + ay;
-                if (
-                  nx >= 0 &&
-                  nx < C.WORLD_MAP_COLS &&
-                  ny >= 0 &&
-                  ny < C.WORLD_MAP_ROWS
-                ) {
-                  const nt = S.worldMap[ny * C.WORLD_MAP_COLS + nx];
-                  if (
-                    nt !== C.TerrainType.Mountain &&
-                    nt !== C.TerrainType.Ocean
-                  ) {
-                    // Also ensure neighbor isn't blocked by building
-                    const npx = nx * 10 + 5,
-                      npy = ny * 10 + 5;
-                    const nbId = U.findNearestBuilding(npx, npy, 10, -1, -1);
-                    if (nbId === -1 || S.bldHealth[nbId] === 0) {
-                      bestAx = ax;
-                      bestAy = ay;
-                      found = true;
-                      break;
-                    }
-                  }
+    if (shouldSeparate) {
+      const px = S.positionX[i];
+      const py = S.positionY[i];
+
+      const sepRad = Math.sqrt(C.SEPARATION_RADIUS_SQ);
+      const minCellX = Math.max(0, Math.floor((px - sepRad) / C.GRID_SIZE));
+      const maxCellX = Math.min(C.GRID_COLS - 1, Math.floor((px + sepRad) / C.GRID_SIZE));
+      const minCellY = Math.max(0, Math.floor((py - sepRad) / C.GRID_SIZE));
+      const maxCellY = Math.min(C.GRID_ROWS - 1, Math.floor((py + sepRad) / C.GRID_SIZE));
+
+      for (let cy = minCellY; cy <= maxCellY; cy++) {
+        for (let cx = minCellX; cx <= maxCellX; cx++) {
+          const cellIndex = cy * C.GRID_COLS + cx;
+          let otherId = S.spatialHead[cellIndex];
+          while (otherId !== -1) {
+            if (otherId !== i) {
+              const otherTraits = S.traitBitmask[otherId];
+              if ((otherTraits & (C.TRAIT_TREE | C.TRAIT_GOLD | C.TRAIT_BUSH)) === 0) {
+                const opx = S.positionX[otherId];
+                const opy = S.positionY[otherId];
+                const sdx = px - opx;
+                const sdy = py - opy;
+                const sdistSq = sdx * sdx + sdy * sdy;
+                if (sdistSq < C.SEPARATION_RADIUS_SQ && sdistSq > 0.0001) {
+                  const sdist = Math.sqrt(sdistSq);
+                  const force = (sepRad - sdist) / sepRad;
+                  sepX += (sdx / sdist) * force;
+                  sepY += (sdy / sdist) * force;
+                  sepCount++;
                 }
               }
-              if (found) break;
             }
-            if (found) {
-              vx = (vx + bestAx * speed * 2.5) / 2;
-              vy = (vy + bestAy * speed * 2.5) / 2;
-            }
+            otherId = S.spatialNext[otherId];
           }
         }
-
-        S.velocityX[i] = vx;
-        S.velocityY[i] = vy;
       }
-    } else {
-      S.velocityX[i] = 0;
-      S.velocityY[i] = 0;
     }
+
+    let repX = 0;
+    let repY = 0;
+    if (sepCount > 0) {
+      repX = (sepX / sepCount) * C.SEPARATION_FORCE_MAX;
+      repY = (sepY / sepCount) * C.SEPARATION_FORCE_MAX;
+    }
+
+    vx += repX;
+    vy += repY;
+
+    const len = Math.sqrt(vx * vx + vy * vy);
+    if (len > 0) {
+      const maxSpeed = (targetId === -3) ? speed * 2.0 : speed * 1.5;
+      if (len > maxSpeed) {
+        vx = (vx / len) * maxSpeed;
+        vy = (vy / len) * maxSpeed;
+      }
+    }
+
+    // Apply steering inertia (50% momentum) to prevent ridge oscillation
+    S.velocityX[i] = S.velocityX[i] * 0.5 + vx * 0.5;
+    S.velocityY[i] = S.velocityY[i] * 0.5 + vy * 0.5;
   }
 }
+

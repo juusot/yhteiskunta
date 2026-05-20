@@ -181,3 +181,48 @@ export const INFLUENCE_RADIUS_WALL = 0;
 
 // Influence decay at border (per day)
 export const INFLUENCE_OVERLAP_PENALTY = 5;
+
+// ==========================================
+// Centralized Physical & Distance Constants
+// ==========================================
+
+// 1. Spatial & Distance Thresholds (Squared)
+export const DIST_SQ_ARRIVAL = 4.0;
+export const DIST_SQ_HARVEST = 100.0;
+export const DIST_SQ_DEPOT_RETURN = 225.0;
+export const DIST_SQ_CONSTRUCT = 225.0;
+export const DIST_SQ_GHOSTING = 400.0;
+export const FLOW_FIELD_FALLBACK_DIST = 8.0;
+
+// 2. Formation Rings
+export const FORMATION_RING_WAREHOUSE = 9.5;
+export const FORMATION_RING_HOUSE = 6.5;
+export const FORMATION_RING_RESOURCE = 4.5;
+export const GOLDEN_ANGLE_RAD = 2.39996; // ~137.5 degrees
+
+// 3. Collision & Repulsion Radii
+export const COLLISION_RADIUS_WAREHOUSE = 8.0;
+export const COLLISION_RADIUS_HOUSE = 5.0;
+export const SEPARATION_RADIUS_SQ = 36.0; // 6.0 units
+export const SEPARATION_FORCE_MAX = 1.5;
+
+// 4. Action Rates & Limits
+export const INVENTORY_MAX_RESOURCE = 50;
+export const INVENTORY_MAX_TRADE = 400;
+export const BUILD_HEALTH_PER_TICK = 5;
+export const BUILD_HEALTH_MAX = 1000;
+
+// 5. Terrain Traversal Cost Multipliers
+export const TERRAIN_COST_ORTHOGONAL = 10;
+export const TERRAIN_COST_DIAGONAL = 14;
+export const TERRAIN_COST_FOREST_ORTHO = 16;
+export const TERRAIN_COST_FOREST_DIAG = 22;
+export const TERRAIN_COST_WATER_ORTHO = 33;
+export const TERRAIN_COST_WATER_DIAG = 47;
+
+// 6. Combat & Aura Constants
+export const COMBAT_PROJ_HIT_DIST_SQ = 16.0; // 4.0 units
+export const COMBAT_PROJ_BASE_DAMAGE = 25;
+export const COMBAT_AGGRO_RADIUS = 50;
+export const COMBAT_MELEE_REACH_SQ = 25.0; // 5.0 units
+export const AURA_MIND_CONTROL_RANGE = 150.0;

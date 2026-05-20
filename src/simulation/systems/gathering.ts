@@ -39,32 +39,33 @@ export function runGatheringSystem(
 
       const groupWood = S.groupWood[groupId];
       const buildingCount = S.groupBuildingCount[groupId];
-      const needsWood = buildingCount === 0 || groupWood < 2000;
+      let needsWood = buildingCount === 0 || groupWood < 2000;
+      let needsFood = true;
+
+      // Restrict gathering to a safe radius around the group warehouse
+      const whX = S.groupWarehouseX[groupId] !== -1 ? S.groupWarehouseX[groupId] : S.positionX[i];
+      const whY = S.groupWarehouseY[groupId] !== -1 ? S.groupWarehouseY[groupId] : S.positionY[i];
+      const MAX_GATHER_RADIUS = 500;
 
       if (needsWood) {
-        const treeId = U.findNearestWithTrait(
-          S.positionX[i],
-          S.positionY[i],
-          400,
-          C.TRAIT_TREE,
-        );
-        if (treeId !== -1) {
-          S.targetEntityId[i] = treeId;
-          S.charTool[i] = 0; // Wood
-          S.state[i] = C.EntityState.Harvesting;
-          continue;
-        }
+        const treeId = U.findNearestWithTrait(whX, whY, MAX_GATHER_RADIUS, C.TRAIT_TREE);
+        if (treeId === -1) needsWood = false; // Too dangerous/far, skip wood
       }
 
-      // If wood not needed or no tree found, check for Food
-      const bushId = U.findNearestWithTrait(
-        S.positionX[i],
-        S.positionY[i],
-        400,
-        C.TRAIT_BUSH,
-      );
-      if (bushId !== -1) {
-        S.targetEntityId[i] = bushId;
+      if (needsWood) {
+        S.targetEntityId[i] = -1;
+        S.charTool[i] = 0; // Wood
+        S.state[i] = C.EntityState.Harvesting;
+        continue;
+      }
+
+      if (needsFood) {
+        const bushId = U.findNearestWithTrait(whX, whY, MAX_GATHER_RADIUS, C.TRAIT_BUSH);
+        if (bushId === -1) needsFood = false;
+      }
+
+      if (needsFood) {
+        S.targetEntityId[i] = -1;
         S.charTool[i] = 2; // Food
         S.state[i] = C.EntityState.Harvesting;
         continue;
@@ -73,6 +74,20 @@ export function runGatheringSystem(
 
     // 2. HARVESTING STATE: Committed execution
     if (S.state[i] === C.EntityState.Harvesting) {
+      if (S.targetEntityId[i] === -1 && S.targetBuildingId[i] === -1) {
+        if (S.tickCount % 5 === (i % 5)) {
+          const tool = S.charTool[i];
+          let trait = C.TRAIT_TREE;
+          if (tool === 1) trait = C.TRAIT_GOLD;
+          if (tool === 2) trait = C.TRAIT_BUSH;
+
+          const nearbyId = U.findNearestWithTrait(S.positionX[i], S.positionY[i], 25, trait);
+          if (nearbyId !== -1) {
+            S.targetEntityId[i] = nearbyId;
+          }
+        }
+      }
+
       const targetId = S.targetEntityId[i];
       const targetBldId = S.targetBuildingId[i];
 
@@ -112,8 +127,8 @@ export function runGatheringSystem(
       const dy = ty - S.positionY[i];
       const distSq = dx * dx + dy * dy;
 
-      if (distSq < 25) {
-        // Within 5 units (5*5 = 25)
+      if (distSq < C.DIST_SQ_HARVEST) {
+        // Within 10 units (10*10 = 100)
         // Harvest rate: 1 unit per tick
         S.entityInventory[i] += 1;
 
@@ -124,8 +139,8 @@ export function runGatheringSystem(
           if (S.health[targetId] <= 0) S.state[targetId] = C.EntityState.Dead;
         }
 
-        // Inventory full (Max 50)
-        if (S.entityInventory[i] >= 50) {
+        // Inventory full
+        if (S.entityInventory[i] >= C.INVENTORY_MAX_RESOURCE) {
           S.state[i] = C.EntityState.ReturningToDepot;
           S.targetEntityId[i] = -1;
           S.targetBuildingId[i] = -1;
@@ -149,7 +164,7 @@ export function runGatheringSystem(
         const dy = S.bldPositionY[whId] - S.positionY[i];
         const distSq = dx * dx + dy * dy;
 
-        if (distSq < 100) {
+        if (distSq < C.DIST_SQ_DEPOT_RETURN) {
           // Within 10 units
           const resourceType = S.charTool[i];
           if (resourceType === 0) {
@@ -170,7 +185,7 @@ export function runGatheringSystem(
         const dy = anchorY - S.positionY[i];
         const distSq = dx * dx + dy * dy;
 
-        if (distSq < 100) {
+        if (distSq < C.DIST_SQ_DEPOT_RETURN) {
           const resourceType = S.charTool[i];
           if (resourceType === 0) {
             Atomics.add(S.money, i, S.entityInventory[i]);
@@ -213,11 +228,11 @@ export function runGatheringSystem(
       const dy = S.bldPositionY[bId] - S.positionY[i];
       const distSq = dx * dx + dy * dy;
 
-      if (distSq < 100) {
-        // "Work" on building: +5 health per tick
-        const oldHealth = Atomics.add(S.bldHealth, bId, 5);
-        if (oldHealth >= 995) {
-          Atomics.store(S.bldHealth, bId, 1000); // Snap to exactly 1000
+      if (distSq < C.DIST_SQ_CONSTRUCT) {
+        // "Work" on building
+        const oldHealth = Atomics.add(S.bldHealth, bId, C.BUILD_HEALTH_PER_TICK);
+        if (oldHealth >= C.BUILD_HEALTH_MAX - C.BUILD_HEALTH_PER_TICK) {
+          Atomics.store(S.bldHealth, bId, C.BUILD_HEALTH_MAX); // Snap to max
           // Construction complete! Give starter food (100)
           Atomics.add(S.bldDataC, bId, 100);
           S.state[i] = C.EntityState.Idle;

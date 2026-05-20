@@ -583,6 +583,7 @@ window.addEventListener("DOMContentLoaded", () => {
     itemInstanceOwnerType: Uint8Array,
     itemInstanceDefId: Uint16Array;
 
+
   // VAOs
   const tileVao = gl.createVertexArray();
   gl.bindVertexArray(tileVao);
@@ -1304,6 +1305,8 @@ window.addEventListener("DOMContentLoaded", () => {
         itemInstanceY = new Float32Array(buffers.itemInstanceY);
         itemInstanceOwnerType = new Uint8Array(buffers.itemInstanceOwnerType);
         itemInstanceDefId = new Uint16Array(buffers.itemInstanceDefId);
+
+
 
         uiWorker.postMessage({ type: "INIT", buffers });
 

@@ -13,6 +13,8 @@ import { runGatheringSystem } from "./simulation/systems/gathering";
 import { runLifecycleSystem } from "./simulation/systems/lifecycle";
 import { initializeWorld } from "./simulation/initialization";
 import { applyGroupTemplate } from "./simulation/templates";
+import { updateAllFlowFields } from "./simulation/systems/flowField";
+
 
 function tick(): void {
   if (S.isPaused) return;
@@ -56,6 +58,7 @@ function tick(): void {
     M.SummarySystem(); // Uses the aggregated stats from parallel systems
 
     if (S.tickCount % 60 === 0) {
+      updateAllFlowFields();
       M.RuleEvaluationSystem();
       M.TradeSystem();
       M.InfluenceSystem();
@@ -85,6 +88,7 @@ self.onmessage = (e: MessageEvent) => {
     if (S.quadrantIndex === 0) {
       S.initializeState();
       initializeWorld();
+      updateAllFlowFields();
 
       // Post initialized with buffers
       self.postMessage({
@@ -195,6 +199,10 @@ self.onmessage = (e: MessageEvent) => {
           projOwnerGroup: S.projOwnerGroup.buffer,
           projLifeTime: S.projLifeTime.buffer,
           charBirthTick: S.charBirthTick.buffer,
+          flowFieldWood: S.flowFieldWood.buffer,
+          flowFieldGold: S.flowFieldGold.buffer,
+          flowFieldFood: S.flowFieldFood.buffer,
+          flowFieldGroupHQ: S.flowFieldGroupHQ.buffer,
         },
       });
     } else {

@@ -102,7 +102,7 @@ export let groupMisc: Int32Array;
 // Phase 11: Environmental Dynamics
 export let worldMap: Uint8Array;
 export let globalFlowField: Float32Array;
-export let integrationField: Float32Array;
+export let integrationField: Uint32Array;
 
 // Phase 18: Influence & Territory
 export let influenceMap: Int16Array;
@@ -161,6 +161,12 @@ export let projVelocityY: Float32Array;
 export let projType: Uint8Array;
 export let projOwnerGroup: Int32Array;
 export let projLifeTime: Int16Array;
+
+// Phase 27: Navigation Flow Fields
+export let flowFieldWood: Int8Array;
+export let flowFieldGold: Int8Array;
+export let flowFieldFood: Int8Array;
+export let flowFieldGroupHQ: Int8Array; // Size: 16 * WORLD_MAP_COLS * WORLD_MAP_ROWS
 
 export let quadrantIndex: number = -1;
 export let minX = 0,
@@ -413,6 +419,20 @@ export function initializeState(): void {
   projOwnerGroup = new Int32Array(new SharedArrayBuffer(C.MAX_PROJECTILES * 4));
   projLifeTime = new Int16Array(new SharedArrayBuffer(C.MAX_PROJECTILES * 2));
 
+  // Navigation Flow Fields Component Allocations
+  flowFieldWood = new Int8Array(
+    new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS),
+  );
+  flowFieldGold = new Int8Array(
+    new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS),
+  );
+  flowFieldFood = new Int8Array(
+    new SharedArrayBuffer(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS),
+  );
+  flowFieldGroupHQ = new Int8Array(
+    new SharedArrayBuffer(16 * C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS),
+  );
+
   initializeLocalState();
 }
 
@@ -538,10 +558,15 @@ export function mapStateBuffers(buffers: any): void {
   projOwnerGroup = new Int32Array(buffers.projOwnerGroup);
   projLifeTime = new Int16Array(buffers.projLifeTime);
 
+  flowFieldWood = new Int8Array(buffers.flowFieldWood);
+  flowFieldGold = new Int8Array(buffers.flowFieldGold);
+  flowFieldFood = new Int8Array(buffers.flowFieldFood);
+  flowFieldGroupHQ = new Int8Array(buffers.flowFieldGroupHQ);
+
   initializeLocalState();
 }
 
 function initializeLocalState(): void {
-  integrationField = new Float32Array(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS);
+  integrationField = new Uint32Array(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS);
   settlementTimerMap = new Int16Array(C.WORLD_MAP_COLS * C.WORLD_MAP_ROWS);
 }

@@ -60,8 +60,8 @@ export function runCombatSystem(
           if (isEnemy) {
             const dx = S.positionX[victimId] - S.projPositionX[i];
             const dy = S.positionY[victimId] - S.projPositionY[i];
-            if (dx * dx + dy * dy < 16.0) {
-              Atomics.sub(S.health, victimId, 25);
+            if (dx * dx + dy * dy < C.COMBAT_PROJ_HIT_DIST_SQ) {
+              Atomics.sub(S.health, victimId, C.COMBAT_PROJ_BASE_DAMAGE);
               // Set target for retaliation if applicable
               if (ownerGroup !== -1) {
                 S.targetEntityId[victimId] =
@@ -88,7 +88,7 @@ export function runCombatSystem(
       const bx = S.bldPositionX[b],
         by = S.bldPositionY[b];
       const ownerGroup = S.bldOwnerGroup[b],
-        range = 150.0,
+        range = C.AURA_MIND_CONTROL_RANGE,
         rangeSq = range * range;
       const cellRadius = Math.ceil(range / C.GRID_SIZE);
       const btx = Math.floor(bx / C.GRID_SIZE);
@@ -135,7 +135,7 @@ export function runCombatSystem(
       const enemyId = U.findNearestEnemy(
         S.positionX[i],
         S.positionY[i],
-        50,
+        C.COMBAT_AGGRO_RADIUS,
         myGroup,
       );
 
@@ -160,8 +160,8 @@ export function runCombatSystem(
       const dy = S.positionY[targetId] - S.positionY[i];
       const distSq = dx * dx + dy * dy;
 
-      // Melee attack range check (e.g., 5 units squared = 25)
-      if (distSq <= 25) {
+      // Melee attack range check
+      if (distSq <= C.COMBAT_MELEE_REACH_SQ) {
         // Halt movement
         S.velocityX[i] = 0;
         S.velocityY[i] = 0;

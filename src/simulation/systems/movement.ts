@@ -23,30 +23,16 @@ export function runMovementSystem(
     let moveX = S.velocityX[i];
     let moveY = S.velocityY[i];
 
-    const nextX = S.positionX[i] + moveX;
-    const nextY = S.positionY[i] + moveY;
+    const curX = S.positionX[i];
+    const curY = S.positionY[i];
 
-    // Terrain Speed Modifiers & Collision
-    const tx = Math.max(
-      0,
-      Math.min(C.WORLD_MAP_COLS - 1, Math.floor(nextX / C.TILE_SIZE)),
-    );
-    const ty = Math.max(
-      0,
-      Math.min(C.WORLD_MAP_ROWS - 1, Math.floor(nextY / C.TILE_SIZE)),
-    );
-    const tileIdx = ty * C.WORLD_MAP_COLS + tx;
-    let blocked = false;
-
-    // 1. Terrain Block Check
-    if (tileIdx >= 0 && tileIdx < S.worldMap.length) {
-      const terrain = S.worldMap[tileIdx];
-      if (
-        terrain === C.TerrainType.Mountain ||
-        terrain === C.TerrainType.Ocean
-      ) {
-        blocked = true;
-      } else if (terrain === C.TerrainType.Forest) {
+    // Apply terrain speed modifiers based on current position
+    const curTx = Math.max(0, Math.min(C.WORLD_MAP_COLS - 1, Math.floor(curX / C.TILE_SIZE)));
+    const curTy = Math.max(0, Math.min(C.WORLD_MAP_ROWS - 1, Math.floor(curY / C.TILE_SIZE)));
+    const curTileIdx = curTy * C.WORLD_MAP_COLS + curTx;
+    if (curTileIdx >= 0 && curTileIdx < S.worldMap.length) {
+      const terrain = S.worldMap[curTileIdx];
+      if (terrain === C.TerrainType.Forest) {
         moveX *= 0.6;
         moveY *= 0.6;
       } else if (terrain === C.TerrainType.Water) {
@@ -55,39 +41,92 @@ export function runMovementSystem(
       }
     }
 
-    // 2. Building Block Check (Spatial Query)
-    if (!blocked) {
-      const nearbyBldId = U.findNearestBuilding(nextX, nextY, 15, -1, -1);
+    let tempX = curX + moveX;
+    let tempY = curY;
+
+    // X-Axis Check
+    const txX = Math.max(0, Math.min(C.WORLD_MAP_COLS - 1, Math.floor(tempX / C.TILE_SIZE)));
+    const tyX = Math.max(0, Math.min(C.WORLD_MAP_ROWS - 1, Math.floor(tempY / C.TILE_SIZE)));
+    const tileIdxX = tyX * C.WORLD_MAP_COLS + txX;
+    let blockedX = false;
+    if (tileIdxX >= 0 && tileIdxX < S.worldMap.length) {
+      const terrain = S.worldMap[tileIdxX];
+      if (terrain === C.TerrainType.Mountain || terrain === C.TerrainType.Ocean) {
+        blockedX = true;
+      }
+    }
+
+    // Dynamic building collision check for X-axis
+    if (!blockedX) {
+      const nearbyBldId = U.findNearestBuilding(tempX, tempY, 15, -1, -1);
       if (nearbyBldId !== -1) {
         const bType = S.bldType[nearbyBldId];
         if (bType === 1 || bType === 2 || bType === 3 || bType === 4) {
-          const bRadius = bType === 1 ? 8.0 : 5.0; // Match shader half-extents
+          const bRadius = bType === C.BuildingType.Warehouse ? C.COLLISION_RADIUS_WAREHOUSE : C.COLLISION_RADIUS_HOUSE;
           const bX = S.bldPositionX[nearbyBldId];
           const bY = S.bldPositionY[nearbyBldId];
-          const bdx = bX - nextX;
-          const bdy = bY - nextY;
+          const bdx = bX - tempX;
+          const bdy = bY - tempY;
           const nextDistSq = bdx * bdx + bdy * bdy;
-
           if (nextDistSq < bRadius * bRadius) {
-            // Potential collision. Only block if we are moving CLOSER to the center.
-            const curDx = bX - S.positionX[i];
-            const curDy = bY - S.positionY[i];
-            const curDistSq = curDx * curDx + curDy * curDy;
-            if (nextDistSq < curDistSq) {
-              blocked = true;
+            const curDx = bX - curX;
+            const curDy = bY - curY;
+            if (nextDistSq < curDx * curDx + curDy * curDy) {
+              blockedX = true;
             }
           }
         }
       }
     }
 
-    if (!blocked) {
-      S.positionX[i] += moveX;
-      S.positionY[i] += moveY;
-    } else {
-      S.velocityX[i] *= -0.5; // Bounce slightly off mountains
-      S.velocityY[i] *= -0.5;
+    if (blockedX) {
+      tempX = curX;
+      S.velocityX[i] = 0;
     }
+
+    // Y-Axis Check
+    tempY = curY + moveY;
+    const txY = Math.max(0, Math.min(C.WORLD_MAP_COLS - 1, Math.floor(tempX / C.TILE_SIZE)));
+    const tyY = Math.max(0, Math.min(C.WORLD_MAP_ROWS - 1, Math.floor(tempY / C.TILE_SIZE)));
+    const tileIdxY = tyY * C.WORLD_MAP_COLS + txY;
+    let blockedY = false;
+    if (tileIdxY >= 0 && tileIdxY < S.worldMap.length) {
+      const terrain = S.worldMap[tileIdxY];
+      if (terrain === C.TerrainType.Mountain || terrain === C.TerrainType.Ocean) {
+        blockedY = true;
+      }
+    }
+
+    // Dynamic building collision check for Y-axis
+    if (!blockedY) {
+      const nearbyBldId = U.findNearestBuilding(tempX, tempY, 15, -1, -1);
+      if (nearbyBldId !== -1) {
+        const bType = S.bldType[nearbyBldId];
+        if (bType === 1 || bType === 2 || bType === 3 || bType === 4) {
+          const bRadius = bType === C.BuildingType.Warehouse ? C.COLLISION_RADIUS_WAREHOUSE : C.COLLISION_RADIUS_HOUSE;
+          const bX = S.bldPositionX[nearbyBldId];
+          const bY = S.bldPositionY[nearbyBldId];
+          const bdx = bX - tempX;
+          const bdy = bY - tempY;
+          const nextDistSq = bdx * bdx + bdy * bdy;
+          if (nextDistSq < bRadius * bRadius) {
+            const curDx = bX - tempX;
+            const curDy = bY - curY;
+            if (nextDistSq < curDx * curDx + curDy * curDy) {
+              blockedY = true;
+            }
+          }
+        }
+      }
+    }
+
+    if (blockedY) {
+      tempY = curY;
+      S.velocityY[i] = 0;
+    }
+
+    S.positionX[i] = tempX;
+    S.positionY[i] = tempY;
 
     // Bounds checking (Strict Clamping)
     if (S.positionX[i] < 0) S.positionX[i] = 0;
