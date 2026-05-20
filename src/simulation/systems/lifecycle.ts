@@ -134,7 +134,9 @@ export function runLifecycleSystem(
             );
             if (bushId !== -1) {
               survivalTask = 0;
-              S.targetEntityId[i] = bushId;
+              // Do NOT lock onto a specific bush from afar (causes twitching)
+              // Instead, assign the generic food gathering task so they use the Flow Field
+              S.targetEntityId[i] = -1; 
               S.charTool[i] = 2; // Food
               S.targetBuildingId[i] = -1;
             }

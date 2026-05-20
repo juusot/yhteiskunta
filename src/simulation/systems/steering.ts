@@ -385,6 +385,11 @@ export function runSteeringSystem(
       repY = (sepY / sepCount) * C.SEPARATION_FORCE_MAX;
     }
 
+    // Mix in local obstacle repulsion (mountains/water and buildings)
+    const obstVec = U.getObstacleRepulsion(S.positionX[i], S.positionY[i]);
+    repX += obstVec.x * 4.0;
+    repY += obstVec.y * 4.0;
+
     vx += repX;
     vy += repY;
 

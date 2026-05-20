@@ -779,15 +779,37 @@ export function StructureEvolutionSystem() {
         }
         if (deducted >= 500) {
           // Spawn new house (bldType = 2) nearby
-          for (let i = 0; i < C.MAX_BUILDINGS; i++) {
-            if (S.bldType[i] === 0) {
-              S.bldType[i] = 2; // House
-              S.bldPositionX[i] = whX + (Math.random() * 40 - 20);
-              S.bldPositionY[i] = whY + (Math.random() * 40 - 20);
-              S.bldHealth[i] = 1000;
-              S.bldOwnerGroup[i] = g;
-              break;
+          let foundSpot = false;
+          let nx = 0, ny = 0;
+          for (let attempts = 0; attempts < 30; attempts++) {
+             nx = whX + (Math.random() * 100 - 50);
+             ny = whY + (Math.random() * 100 - 50);
+             const nearbyId = U.findNearestBuilding(nx, ny, 16, -1, -1);
+             if (nearbyId === -1) {
+                foundSpot = true;
+                break;
+             }
+          }
+
+          if (foundSpot) {
+            for (let i = 0; i < C.MAX_BUILDINGS; i++) {
+              if (S.bldType[i] === 0) {
+                S.bldType[i] = 2; // House
+                S.bldPositionX[i] = nx;
+                S.bldPositionY[i] = ny;
+                S.bldHealth[i] = 1000;
+                S.bldOwnerGroup[i] = g;
+                break;
+              }
             }
+          } else {
+             // Refund wood if no space found
+             for (let b = 0; b < C.MAX_BUILDINGS; b++) {
+               if (S.bldType[b] === 1 && S.bldOwnerGroup[b] === g) {
+                 Atomics.add(S.bldDataA, b, 500);
+                 break;
+               }
+             }
           }
         }
       }

@@ -690,3 +690,73 @@ export function setItemInstanceGround(
   S.itemInstanceY[instanceId] = y;
   S.itemInstanceOwnerId[instanceId] = -1;
 }
+
+export function getObstacleRepulsion(x: number, y: number): { x: number, y: number } {
+  let repX = 0;
+  let repY = 0;
+  const pushForce = 0.5;
+
+  // 1. Terrain Repulsion (Mountains/Ocean)
+  const tx = Math.floor(x / C.TILE_SIZE);
+  const ty = Math.floor(y / C.TILE_SIZE);
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      const nx = tx + dx;
+      const ny = ty + dy;
+      if (nx >= 0 && nx < C.WORLD_MAP_COLS && ny >= 0 && ny < C.WORLD_MAP_ROWS) {
+        const terrain = S.worldMap[ny * C.WORLD_MAP_COLS + nx];
+        if (terrain === C.TerrainType.Mountain || terrain === C.TerrainType.Ocean) {
+          const ox = nx * C.TILE_SIZE + C.TILE_SIZE / 2;
+          const oy = ny * C.TILE_SIZE + C.TILE_SIZE / 2;
+          const odx = x - ox;
+          const ody = y - oy;
+          const odistSq = odx * odx + ody * ody;
+          const oRadius = C.TILE_SIZE / 2 + 1.5;
+          if (odistSq < oRadius * oRadius && odistSq > 0.0001) {
+            const odist = Math.sqrt(odistSq);
+            const force = (oRadius - odist) / oRadius;
+            repX += (odx / odist) * force * pushForce;
+            repY += (ody / odist) * force * pushForce;
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Building Repulsion
+  const nearbyBldId = findNearestBuilding(x, y, 15, -1, -1);
+  if (nearbyBldId !== -1) {
+    const bType = S.bldType[nearbyBldId];
+    if (bType === 1 || bType === 2 || bType === 3 || bType === 4) {
+      const bRadius = bType === C.BuildingType.Warehouse ? C.COLLISION_RADIUS_WAREHOUSE : C.COLLISION_RADIUS_HOUSE;
+      const bX = S.bldPositionX[nearbyBldId];
+      const bY = S.bldPositionY[nearbyBldId];
+      const bdx = x - bX;
+      const bdy = y - bY;
+      const bdistSq = bdx * bdx + bdy * bdy;
+      
+      // Expand the push radius slightly to give a buffer
+      const pushRadius = bRadius + 3.0; 
+      
+      if (bdistSq < pushRadius * pushRadius && bdistSq > 0.0001) {
+        const bdist = Math.sqrt(bdistSq);
+        
+        // Massive force if actually inside the building, scaling down to 0 at the edge of the buffer
+        let force = (pushRadius - bdist) / pushRadius;
+        let bldPushForce = bdist < bRadius ? 15.0 : 3.0; // Overpower the flow field (1.5)
+        
+        // Radial Push (Away from center)
+        repX += (bdx / bdist) * force * bldPushForce;
+        repY += (bdy / bdist) * force * bldPushForce;
+        
+        // Tangential Curl (Slide around)
+        const curlForce = bldPushForce * 0.5;
+        repX += -(bdy / bdist) * force * curlForce;
+        repY += (bdx / bdist) * force * curlForce;
+      }
+    }
+  }
+
+  return { x: repX, y: repY };
+}

@@ -56,29 +56,6 @@ export function runMovementSystem(
       }
     }
 
-    // Dynamic building collision check for X-axis
-    if (!blockedX) {
-      const nearbyBldId = U.findNearestBuilding(tempX, tempY, 15, -1, -1);
-      if (nearbyBldId !== -1) {
-        const bType = S.bldType[nearbyBldId];
-        if (bType === 1 || bType === 2 || bType === 3 || bType === 4) {
-          const bRadius = bType === C.BuildingType.Warehouse ? C.COLLISION_RADIUS_WAREHOUSE : C.COLLISION_RADIUS_HOUSE;
-          const bX = S.bldPositionX[nearbyBldId];
-          const bY = S.bldPositionY[nearbyBldId];
-          const bdx = bX - tempX;
-          const bdy = bY - tempY;
-          const nextDistSq = bdx * bdx + bdy * bdy;
-          if (nextDistSq < bRadius * bRadius) {
-            const curDx = bX - curX;
-            const curDy = bY - curY;
-            if (nextDistSq < curDx * curDx + curDy * curDy) {
-              blockedX = true;
-            }
-          }
-        }
-      }
-    }
-
     if (blockedX) {
       tempX = curX;
       S.velocityX[i] = 0;
@@ -94,29 +71,6 @@ export function runMovementSystem(
       const terrain = S.worldMap[tileIdxY];
       if (terrain === C.TerrainType.Mountain || terrain === C.TerrainType.Ocean) {
         blockedY = true;
-      }
-    }
-
-    // Dynamic building collision check for Y-axis
-    if (!blockedY) {
-      const nearbyBldId = U.findNearestBuilding(tempX, tempY, 15, -1, -1);
-      if (nearbyBldId !== -1) {
-        const bType = S.bldType[nearbyBldId];
-        if (bType === 1 || bType === 2 || bType === 3 || bType === 4) {
-          const bRadius = bType === C.BuildingType.Warehouse ? C.COLLISION_RADIUS_WAREHOUSE : C.COLLISION_RADIUS_HOUSE;
-          const bX = S.bldPositionX[nearbyBldId];
-          const bY = S.bldPositionY[nearbyBldId];
-          const bdx = bX - tempX;
-          const bdy = bY - tempY;
-          const nextDistSq = bdx * bdx + bdy * bdy;
-          if (nextDistSq < bRadius * bRadius) {
-            const curDx = bX - tempX;
-            const curDy = bY - curY;
-            if (nextDistSq < curDx * curDx + curDy * curDy) {
-              blockedY = true;
-            }
-          }
-        }
       }
     }
 
